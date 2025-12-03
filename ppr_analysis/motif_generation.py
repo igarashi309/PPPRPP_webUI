@@ -236,6 +236,11 @@ def parse_pprfinder_output(motifs_file, protein_fasta, output_dir):
     with open(output_pkl, "wb") as f:
         pickle.dump(parsed_ppr, f)
         
+    # Also save the motifs txt to a predictable name for visualization
+    import shutil
+    output_txt = Path(output_dir) / f"{seq_id}_motifs.txt"
+    shutil.copy(motifs_file, output_txt)
+        
     return str(output_pkl)
 
 def run_ps_scan(protein_fasta, output_dir):

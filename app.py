@@ -65,63 +65,84 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     try:
         if tool_choice == "PPRFinder":
             pkl_path = motif_generation.run_pprfinder(tmp_fasta_path, output_dir)
+            # Motifs file is now saved as {seq_id}_motifs.txt in output_dir
+            seq_id = os.path.basename(pkl_path).replace('.pkl', '')
+            motifs_file = Path(output_dir) / f"{seq_id}_motifs.txt"
         else: # PS_Scan
             # PS_Scan log parsing is not fully implemented in this version to produce .pkl
             # We will try to run it but might fail to proceed to analysis if .pkl is not generated.
             # For unified flow, we strongly recommend PPRFinder.
             log_path = motif_generation.run_ps_scan(tmp_fasta_path, output_dir)
-            return f"PS_Scan executed. Log saved to {os.path.basename(log_path)}. (Unified analysis requires PPRFinder for now)", None, None, None, None, None
+            return f"PS_Scan executed. Log saved to {os.path.basename(log_path)}. (Unified analysis requires PPRFinder for now)", None, None, None, None, None, None, None
             
         if not pkl_path:
-             return "Error: Motif discovery failed.", None, None, None, None, None
+             return "Error: Motif discovery failed.", None, None, None, None, None, None, None
 
     except Exception as e:
-        return f"Error during discovery: {e}", None, None, None, None, None
+        return f"Error during discovery: {e}", None, None, None, None, None, None, None
     finally:
         if os.path.exists(tmp_fasta_path):
             os.remove(tmp_fasta_path)
 
     # 4. Run Analysis
+    status_msg += f"\nRunning Analysis ({analysis_type})..."
+    
     # Load the discovered motifs
     try:
         motif_data = ppr_io.load_ppr_data_from_pickle(pkl_path)
         ppr_name = os.path.basename(pkl_path)
     except Exception as e:
-        return f"Error loading motifs: {e}", None, None, None, None, None
+        return f"Error loading motifs: {e}", None, None, None, None, None, None, None
 
     # Run Analysis (Both Strands)
     min_front = 7
     min_back = 7
     max_gap = 0
+    
+    # Prepare RNA sequence
+    # rna_input is already defined from rna_text or rna_file earlier.
+    if not rna_input:
+        return "Error: No RNA sequence provided.", None, None, None, None, None, None, None
+
+    # Parse RNA FASTA
+    try:
+        rna_record = next(SeqIO.parse(io.StringIO(rna_input), "fasta"))
+        rna_seq = str(rna_record.seq).upper().replace("U", "T") # Convert to DNA for analysis if needed, or keep RNA. Core usually expects DNA/RNA string.
+    except Exception as e:
+        # Fallback if raw sequence or malformed FASTA
+        rna_seq = rna_input.strip().upper().replace("U", "T")
+
     all_scores = []
     predicted_scores = [] # Default empty, or could allow manual input. For unified, we assume default/empty.
     
     try:
         # Forward
-        scores_fwd = core.analyze_ppr_data(motif_data, sequence, min_front, min_back, max_gap, predicted_scores, ppr_name)
+        scores_fwd = core.analyze_ppr_data(motif_data, rna_seq, min_front, min_back, max_gap, predicted_scores, ppr_name)
         if analysis_type in scores_fwd:
             for s in scores_fwd[analysis_type]:
                 row = list(s)
                 row.append("Forward")
-                row.append(row[0])
+                row.append(row[0]) # Genome_Position for forward is same as relative
                 all_scores.append(row)
         
         # Reverse
-        rev_seq = core.get_reverse_complement(sequence)
+        rev_seq = core.get_reverse_complement(rna_seq)
         scores_rev = core.analyze_ppr_data(motif_data, rev_seq, min_front, min_back, max_gap, predicted_scores, ppr_name)
         if analysis_type in scores_rev:
             for s in scores_rev[analysis_type]:
                 row = list(s)
                 row.append("Reverse")
-                genome_pos = len(sequence) - 1 - row[0]
+                genome_pos = len(rna_seq) - 1 - row[0] # Adjust position for reverse strand
                 row.append(genome_pos)
                 all_scores.append(row)
                 
     except Exception as e:
-        return f"Error during analysis: {e}", None, None, None, None, None
+        import traceback
+        traceback.print_exc()
+        return f"Error during analysis: {e}", None, None, None, None, None, None, None
 
     if not all_scores:
-        return "Error: No binding sites found.", None, None, None, None, None
+        return "Error: No binding sites found.", None, None, None, None, None, None, None
 
     # Create DataFrame
     columns = [
@@ -137,6 +158,19 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     df.to_csv(csv_path, index=False)
 
     # 5. Visualization (Genome Browser)
+    fig = plot_genome_browser(df, seq_id, analysis_type)
+    
+    # 6. Visualize Motifs
+    motif_df, motif_fig = pd.DataFrame(), go.Figure()
+    if motifs_file and os.path.exists(motifs_file):
+        motif_df, motif_fig = visualize_motifs(motifs_file)
+    else:
+        status_msg += "\nWarning: Motif details file not found for visualization."
+
+    return "Analysis Complete", df, csv_path, fig, go.Figure(), df, motif_df, motif_fig
+    
+def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis"):
+    """Helper to plot the genome browser."""
     fig = go.Figure()
     
     unique_ppr_names = df['PPR_Name'].unique()
@@ -178,8 +212,89 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
         height=600,
         hovermode="closest"
     )
-    
-    return "Analysis Complete", df, csv_path, fig, go.Figure(), df
+    return fig
+
+def visualize_motifs(motifs_file):
+    """Parses motifs file and returns DataFrame and Plotly figure."""
+    try:
+        # Read _motifs.txt (created by ppr_finder.py)
+        # Columns: header, start, end, score, motif_seq, second, fifth, last, name
+        # No header in file
+        col_names = ['Header', 'Start', 'End', 'Score', 'Sequence', '2nd', '5th', 'Last', 'Type']
+        df = pd.read_csv(motifs_file, sep='\t', names=col_names, header=None)
+        
+        if df.empty:
+             return pd.DataFrame(), go.Figure()
+
+        # Add Code column
+        df['Code'] = df['5th'] + df['Last']
+        
+        # Plot
+        fig = go.Figure()
+        
+        # Draw protein backbone (line)
+        max_pos = df['End'].max() + 50
+        fig.add_trace(go.Scatter(
+            x=[0, max_pos], y=[0, 0],
+            mode='lines',
+            line=dict(color='gray', width=2),
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+        
+        # Color map
+        color_map = {
+            'P': '#1f77b4', 'P1': '#aec7e8', 'P2': '#ff7f0e',
+            'L': '#2ca02c', 'L1': '#98df8a', 'L2': '#d62728',
+            'S': '#9467bd', 'S1': '#c5b0d5', 'S2': '#8c564b',
+            'SS': '#e377c2'
+        }
+        
+        # Draw motifs as rectangles
+        for _, row in df.iterrows():
+            color = color_map.get(row['Type'], '#bcbd22')
+            
+            # Rectangle
+            fig.add_shape(
+                type="rect",
+                x0=row['Start'], x1=row['End'],
+                y0=-0.2, y1=0.2,
+                line=dict(color="black", width=1),
+                fillcolor=color,
+                opacity=0.8
+            )
+            
+            # Text (Code)
+            fig.add_annotation(
+                x=(row['Start'] + row['End']) / 2,
+                y=0,
+                text=row['Code'],
+                showarrow=False,
+                font=dict(color="white", size=10)
+            )
+            
+            # Text (Type) - above
+            fig.add_annotation(
+                x=(row['Start'] + row['End']) / 2,
+                y=0.3,
+                text=row['Type'],
+                showarrow=False,
+                font=dict(color="black", size=8)
+            )
+
+        fig.update_layout(
+            title="Predicted PPR Motifs",
+            xaxis_title="Amino Acid Position",
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-0.5, 0.5]),
+            height=250,
+            margin=dict(l=20, r=20, t=40, b=20)
+        )
+        
+        return df[['Type', 'Start', 'End', 'Score', '5th', 'Last', 'Code', 'Sequence']], fig
+        
+    except Exception as e:
+        print(f"Error visualizing motifs: {e}")
+        return pd.DataFrame(), go.Figure()
 
 def generate_detail_figure(row):
     """Helper to generate the detail bar chart for a single row."""
@@ -320,6 +435,12 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
             
     # Outputs
     with gr.Row():
+        with gr.Column():
+            gr.Markdown("### Motif Discovery Results")
+            motif_plot = gr.Plot(label="Motif Architecture")
+            motif_table = gr.DataFrame(label="Motif Details")
+            
+    with gr.Row():
         plot_browser = gr.Plot(label="Genome Browser (Click point to see details)")
     
     with gr.Row():
@@ -341,7 +462,7 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
     run_btn.click(
         run_unified_analysis,
         inputs=[prot_text, prot_file, rna_text, rna_file, tool_select, analysis_select, job_name_input],
-        outputs=[status_output, df_output, csv_output, plot_browser, plot_detail, df_state]
+        outputs=[status_output, df_output, csv_output, plot_browser, plot_detail, df_state, motif_table, motif_plot]
     )
     
     print(f"DEBUG: plot_browser type: {type(plot_browser)}")
