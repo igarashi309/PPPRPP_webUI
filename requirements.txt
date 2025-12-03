@@ -1,0 +1,7 @@
+gradio>=4.44.0
+biopython
+plotly
+logomaker
+pandas
+numpy
+py3Dmol
