@@ -152,7 +152,8 @@ def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_v
                 ppr_motif_scores, 
                 total_score, 
                 motif_binding_score_list, 
-                predicted_scores
+                predicted_scores,
+                ppr_scores # Add ppr_scores (Motif Confidence Scores) to output
             ))
     return all_scores
 

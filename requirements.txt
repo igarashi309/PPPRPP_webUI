@@ -5,3 +5,4 @@ logomaker
 pandas
 numpy
 py3Dmol
+matplotlib

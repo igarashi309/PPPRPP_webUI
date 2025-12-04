@@ -2,6 +2,7 @@ import gradio as gr
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+import matplotlib.pyplot as plt
 import os
 import tempfile
 import pickle
@@ -15,6 +16,9 @@ from ppr_analysis import core, io as ppr_io, visualization, config, motif_genera
 if int(gr.__version__.split('.')[0]) < 4:
     raise RuntimeError(f"Gradio version {gr.__version__} is too old. Please install gradio>=4.0.0")
 print(f"Gradio Version: {gr.__version__}")
+
+# --- Constants ---
+TMP_DIR = tempfile.gettempdir()
 
 # --- Logic Functions ---
 
@@ -69,11 +73,10 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
             seq_id = os.path.basename(pkl_path).replace('.pkl', '')
             motifs_file = Path(output_dir) / f"{seq_id}_motifs.txt"
         else: # PS_Scan
-            # PS_Scan log parsing is not fully implemented in this version to produce .pkl
-            # We will try to run it but might fail to proceed to analysis if .pkl is not generated.
-            # For unified flow, we strongly recommend PPRFinder.
-            log_path = motif_generation.run_ps_scan(tmp_fasta_path, output_dir)
-            return f"PS_Scan executed. Log saved to {os.path.basename(log_path)}. (Unified analysis requires PPRFinder for now)", None, None, None, None, None, None, None
+            # Use the Web API version to avoid local binary issues
+            pkl_path = motif_generation.run_ps_scan_api(tmp_fasta_path, output_dir)
+            seq_id = os.path.basename(pkl_path).replace('.pkl', '')
+            motifs_file = Path(output_dir) / f"{seq_id}_motifs.txt"
             
         if not pkl_path:
              return "Error: Motif discovery failed.", None, None, None, None, None, None, None
@@ -149,6 +152,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
         "Position_Relative", "PPR_Binding_Score", "PPR_Name", "Motif_Labels",
         "Motif_Labels_GAP", "Gap_Size", "Segment", "PPR_Motif_Scores",
         "Total_Score", "PPR_Binding_Scores_List", "Predicted PPR Motif Scores List",
+        "Motif_Confidence_Scores", # Added
         "Strand", "Genome_Position"
     ]
     df = pd.DataFrame(all_scores, columns=columns)
@@ -297,15 +301,26 @@ def visualize_motifs(motifs_file):
         return pd.DataFrame(), go.Figure()
 
 def generate_detail_figure(row):
-    """Helper to generate the detail bar chart for a single row."""
+    """Helper to generate the detail bar chart for a single row using Plotly."""
     try:
         def parse_list_col(val):
             if isinstance(val, list): return val
             return [float(x) for x in str(val).split(',')]
 
         scores = parse_list_col(row['PPR_Motif_Scores'])
+        
+        # Fallback if PPR_Motif_Scores is empty (happens if predicted_scores was empty during analysis)
+        if not scores:
+            scores = parse_list_col(row['PPR_Binding_Scores_List'])
+            
         motif_labels = row['Motif_Labels_GAP'].split(',') if isinstance(row['Motif_Labels_GAP'], str) else row['Motif_Labels_GAP']
         segment = row['Segment']
+        total_score = row['Total_Score']
+        
+        # Parse Motif Confidence Scores if available
+        confidence_scores = []
+        if 'Motif_Confidence_Scores' in row:
+             confidence_scores = parse_list_col(row['Motif_Confidence_Scores'])
         
         # Prepare data for plotting
         x_labels = []
@@ -338,20 +353,42 @@ def generate_detail_figure(row):
             # Text on bar
             text_labels.append(label)
 
-        fig = go.Figure(go.Bar(
+        fig = go.Figure()
+        
+        # Bar chart for Binding Scores
+        fig.add_trace(go.Bar(
             x=x_labels, 
             y=scores, 
             text=text_labels,
             textposition='auto', 
-            marker_color=colors
+            marker_color=colors,
+            name="Binding Score"
         ))
         
+        # Line chart for Confidence Scores (if available)
+        if confidence_scores and len(confidence_scores) == len(scores):
+            fig.add_trace(go.Scatter(
+                x=x_labels,
+                y=confidence_scores,
+                mode='lines+markers',
+                name='Motif Confidence',
+                line=dict(color='black', width=2, dash='dot'),
+                yaxis='y2'
+            ))
+        
         fig.update_layout(
-            title=f"Detail: {row['PPR_Name']} at {row['Genome_Position']} ({row['Strand']})",
+            title=f"Detail: {row['PPR_Name']} at {row['Genome_Position']} ({row['Strand']})<br>Total Score: {total_score:.2f}",
             xaxis_title="Position / Nucleotide",
             yaxis_title="Binding Score",
+            yaxis2=dict(
+                title="Motif Confidence",
+                overlaying='y',
+                side='right',
+                showgrid=False
+            ),
             height=400,
-            showlegend=False
+            showlegend=True,
+            legend=dict(x=0, y=1.1, orientation="h")
         )
         return fig
     except Exception as e:
@@ -359,7 +396,7 @@ def generate_detail_figure(row):
 
 def update_detail_plot(evt: gr.SelectData, df):
     if df is None or df.empty:
-        return go.Figure()
+        return go.Figure(), ""
         
     try:
         x_val = evt.value['x']
@@ -371,35 +408,178 @@ def update_detail_plot(evt: gr.SelectData, df):
         row = df[mask]
         
         if row.empty:
-            return go.Figure(layout=dict(title="No data found for clicked point"))
+            return go.Figure(layout=dict(title="No data found for clicked point")), ""
             
-        return generate_detail_figure(row.iloc[0])
+        best_row = row.iloc[0]
+        return generate_detail_figure(best_row), best_row['Segment']
         
     except Exception as e:
-        return go.Figure(layout=dict(title=f"Error: {e}"))
+        return go.Figure(layout=dict(title=f"Error: {e}")), ""
 
-def show_manual_detail(position, df):
-    """Show detail for a manually entered position."""
+def show_manual_detail(position, strand, df):
+    """Show detail for a manually entered position and strand."""
     if df is None or df.empty:
-        return go.Figure(layout=dict(title="No analysis data available"))
+        return go.Figure(layout=dict(title="No analysis data available. Please run analysis first.")), ""
     
     if position is None:
-        return go.Figure(layout=dict(title="Please enter a position"))
+        return go.Figure(layout=dict(title="Please enter a position")), ""
 
     try:
-        # Find rows at this position
-        # We might have multiple (different PPRs). We'll pick the one with max score.
-        rows = df[df['Genome_Position'] == int(position)]
+        # Find rows at this position and strand
+        target_pos = int(position)
+        rows = df[(df['Genome_Position'] == target_pos) & (df['Strand'] == strand)]
         
         if rows.empty:
-            return go.Figure(layout=dict(title=f"No binding sites found at position {position}"))
+            # Check if position exists in any strand to give better error
+            any_rows = df[df['Genome_Position'] == target_pos]
+            if not any_rows.empty:
+                 available_strands = any_rows['Strand'].unique()
+                 return go.Figure(layout=dict(title=f"No binding sites found at {target_pos} ({strand}). Found in: {', '.join(available_strands)}")), ""
             
-        # Sort by score descending and pick top
-        best_row = rows.sort_values('PPR_Binding_Score', ascending=False).iloc[0]
+            min_pos = df['Genome_Position'].min()
+            max_pos = df['Genome_Position'].max()
+            return go.Figure(layout=dict(title=f"No binding sites found at position {target_pos}. Valid range: {min_pos} - {max_pos}")), ""
+            
+        # Pick the first one (should be unique per strand/pos usually)
+        best_row = rows.iloc[0]
         
-        return generate_detail_figure(best_row)
+        return generate_detail_figure(best_row), best_row['Segment']
     except Exception as e:
-        return go.Figure(layout=dict(title=f"Error: {e}"))
+        return go.Figure(layout=dict(title=f"Error: {e}")), ""
+
+# --- IGV Helper Removed ---
+# def generate_igv_html(fasta_path, bedgraph_path, locus_id): ...
+
+def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, analysis_type, job_name):
+    """
+    Orchestrates the analysis starting from an NCBI Accession ID.
+    Yields updates for real-time logging in Gradio.
+    """
+    status_msg = ""
+    log_buffer = []
+    
+    # Helper to construct the output tuple
+    # Outputs: [status_output, ncbi_fasta_download, ncbi_bedgraph_download, ncbi_gff_download, ncbi_df_output, ncbi_download, plot_browser, ncbi_log_output]
+    def make_output(status, fasta=None, bedgraph=None, gff=None, df=None, csv=None, fig=None):
+        return (
+            status, 
+            fasta, 
+            bedgraph,
+            gff,
+            df, 
+            csv, 
+            fig, 
+            "\n".join(log_buffer)
+        )
+
+    def log(message):
+        log_buffer.append(message)
+        print(message)
+        
+    # 1. Fetch FASTA from NCBI
+    try:
+        log(f"Fetching {accession_id} from NCBI...")
+        yield make_output("Fetching...")
+        
+        fasta_path = ncbi.fetch_fasta(accession_id, output_dir=TMP_DIR)
+        log(f"Fetched FASTA: {fasta_path}")
+        yield make_output("Fetched FASTA.")
+        
+    except Exception as e:
+        err_msg = f"Error fetching from NCBI: {e}"
+        log(err_msg)
+        yield make_output(err_msg)
+        return
+        
+    # 2. Read the fetched FASTA content
+    try:
+        with open(fasta_path, "r") as f:
+            rna_text = f.read()
+        log(f"Read FASTA content ({len(rna_text)} bytes).")
+        yield make_output("Read FASTA.")
+    except Exception as e:
+        err_msg = f"Error reading FASTA file: {e}"
+        log(err_msg)
+        yield make_output(err_msg)
+        return
+        
+    # 3. Run Unified Analysis
+    log("Starting unified analysis (this may take a few minutes)...")
+    yield make_output("Running Analysis...")
+    
+    try:
+        # This is a blocking call, so no updates during this part unless we refactor run_unified_analysis too.
+        # But at least the user sees "Running Analysis..." and the logs up to here.
+        result = run_unified_analysis(protein_text, protein_file, rna_text, None, tool_choice, analysis_type, job_name)
+        
+        # Unpack result
+        msg, df, csv_path, fig_browser, fig_detail, df_state, motif_df, motif_fig = result
+        log(f"Analysis result: {msg}")
+        yield make_output("Analysis Finished.", df=df, csv=csv_path, fig=fig_browser)
+        
+    except Exception as e:
+        err_msg = f"Error during unified analysis: {e}"
+        log(err_msg)
+        import traceback
+        log(traceback.format_exc())
+        yield make_output(err_msg)
+        return
+    
+    if df is None or df.empty:
+        err_msg = f"Analysis failed or no results: {msg}"
+        log(err_msg)
+        yield make_output(err_msg)
+        return
+        
+    log(f"Analysis complete. DataFrame shape: {df.shape}")
+        
+    # 4. Generate bedGraph for IGV
+    try:
+        bedgraph_path = os.path.join(TMP_DIR, f"{accession_id}_{job_name}.bedgraph")
+        log(f"Generating bedGraph at {bedgraph_path}...")
+        yield make_output("Generating bedGraph...", df=df, csv=csv_path, fig=fig_browser)
+        
+        with open(bedgraph_path, "w") as f:
+            f.write(f"track type=bedGraph name='{analysis_type}' description='PPR Binding Score' visibility=full color=0,0,255\n")
+            
+            from Bio import SeqIO
+            record = next(SeqIO.parse(fasta_path, "fasta"))
+            chrom_id = record.id
+            log(f"Chromosome ID from FASTA: {chrom_id}")
+            
+            df_fwd = df[df['Strand'] == 'Forward']
+            count = 0
+            for _, row in df_fwd.iterrows():
+                pos = int(row['Genome_Position'])
+                score = float(row['PPR_Binding_Score'])
+                f.write(f"{chrom_id}\t{pos}\t{pos+1}\t{score}\n")
+                count += 1
+            log(f"Written {count} records to bedGraph.")
+            
+    except Exception as e:
+        err_msg = f"Error generating bedGraph: {e}"
+        log(err_msg)
+        yield make_output(err_msg, df=df, csv=csv_path, fig=fig_browser)
+        return
+            
+    # Return paths for download
+    log(f"Ready for download: {fasta_path}, {bedgraph_path}")
+    
+    # 5. Fetch GFF3 (Annotations)
+    gff3_path = None
+    try:
+        log(f"Fetching GFF3 annotations for {accession_id}...")
+        yield make_output("Fetching GFF3...", df=df, csv=csv_path, fig=fig_browser)
+        gff3_path = ncbi.fetch_gff(accession_id, output_dir=TMP_DIR)
+        if gff3_path:
+            log(f"Fetched GFF3: {gff3_path}")
+        else:
+            log("GFF3 fetch returned None (might not be available).")
+    except Exception as e:
+        log(f"Warning: Failed to fetch GFF3: {e}")
+        # Don't fail the whole analysis for this
+    
+    yield make_output("Done", fasta=fasta_path, bedgraph=bedgraph_path, df=df, csv=csv_path, fig=fig_browser, gff=gff3_path)
 
 # --- UI Definition ---
 
@@ -446,10 +626,13 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
     with gr.Row():
         with gr.Column(scale=1):
             gr.Markdown("### Inspect Specific Site")
-            manual_pos = gr.Number(label="Genome Position", precision=0)
+            with gr.Row():
+                manual_pos = gr.Number(label="Genome Position", precision=0)
+                manual_strand = gr.Radio(["Forward", "Reverse"], value="Forward", label="Strand")
             manual_btn = gr.Button("Show Detail")
         with gr.Column(scale=3):
             plot_detail = gr.Plot(label="Selected Site Detail")
+            detail_seq = gr.Textbox(label="Binding Sequence", interactive=True)
         
     with gr.Accordion("Data Table & Download", open=False):
         df_output = gr.DataFrame(label="Results Summary")
@@ -458,6 +641,34 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
     # State
     df_state = gr.State()
     
+    with gr.Tab("NCBI Analysis"):
+        gr.Markdown("### Import Target Sequence from NCBI and Analyze")
+        gr.Markdown("Enter an NCBI Accession ID to fetch the sequence and analyze binding sites. Download the generated FASTA and BedGraph files to view them in the [IGV Desktop Application](https://igv.org/doc/desktop/).")
+        
+        with gr.Row():
+            ncbi_accession = gr.Textbox(label="NCBI Accession ID", placeholder="e.g., NC_000932", value="NC_000932")
+            ncbi_btn = gr.Button("Fetch & Analyze", variant="primary")
+        
+        with gr.Row():
+            ncbi_fasta_download = gr.File(label="Download FASTA (Reference Genome)")
+            ncbi_bedgraph_download = gr.File(label="Download BedGraph (Binding Scores)")
+            ncbi_gff_download = gr.File(label="Download GFF3 (Gene Annotations)")
+        
+        with gr.Row():
+            ncbi_log_output = gr.Textbox(label="Analysis Log", lines=10, interactive=False)
+        
+        with gr.Row():
+            ncbi_df_output = gr.DataFrame(label="Results Summary")
+            ncbi_download = gr.File(label="Download CSV")
+            
+        # Reuse protein inputs from the main tab (or duplicate them if needed for clarity)
+        # For simplicity, let's assume the user sets the protein in the main tab or we duplicate the inputs here.
+        # Duplicating might be safer to avoid confusion.
+        
+        with gr.Accordion("Analysis Settings (Same as Main Tab)", open=False):
+             # We can just link to the main tab's inputs in the click handler
+             pass
+
     # Events
     run_btn.click(
         run_unified_analysis,
@@ -465,11 +676,17 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
         outputs=[status_output, df_output, csv_output, plot_browser, plot_detail, df_state, motif_table, motif_plot]
     )
     
+    ncbi_btn.click(
+        run_ncbi_analysis,
+        inputs=[ncbi_accession, prot_text, prot_file, tool_select, analysis_select, job_name_input],
+        outputs=[status_output, ncbi_fasta_download, ncbi_bedgraph_download, ncbi_gff_download, ncbi_df_output, ncbi_download, plot_browser, ncbi_log_output] 
+    )
+    
     print(f"DEBUG: plot_browser type: {type(plot_browser)}")
     print(f"DEBUG: plot_browser attributes: {dir(plot_browser)}")
     
     try:
-        plot_browser.select(update_detail_plot, inputs=[df_state], outputs=[plot_detail])
+        plot_browser.select(update_detail_plot, inputs=[df_state], outputs=[plot_detail, detail_seq])
     except AttributeError:
         print("WARNING: plot_browser.select() failed. Interactive features disabled.")
     except Exception as e:
@@ -478,9 +695,9 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
     # Manual Event
     manual_btn.click(
         show_manual_detail,
-        inputs=[manual_pos, df_state],
-        outputs=[plot_detail]
+        inputs=[manual_pos, manual_strand, df_state],
+        outputs=[plot_detail, detail_seq]
     )
 
 if __name__ == "__main__":
-    demo.launch(share=True)
+    demo.launch(share=True, inbrowser=True)

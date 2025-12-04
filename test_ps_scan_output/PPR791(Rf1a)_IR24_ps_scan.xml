@@ -1,0 +1,160 @@
+<scanprosite_response>
+	<anti-timeout></anti-timeout>
+	<matchset xmlns="urn:expasy:scanprosite" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:expasy:scanprosite http://expasy.org/tools/scanprosite/scanprosite.xsd" n_match="19" n_seq="1">
+		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>86</start>
+			<stop>120</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>9.624</score>
+			<level>0</level>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>121</start>
+			<stop>156</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>10.205</score>
+			<level>0</level>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>157</start>
+			<stop>187</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>9.821</score>
+			<level>0</level>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>195</start>
+			<stop>229</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>12.737</score>
+			<level>0</level>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>230</start>
+			<stop>264</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>13.121</score>
+			<level>0</level>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>265</start>
+			<stop>299</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>13.614</score>
+			<level>0</level>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>300</start>
+			<stop>334</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>13.263</score>
+			<level>0</level>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>335</start>
+			<stop>369</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>9.931</score>
+			<level>0</level>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>370</start>
+			<stop>404</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>12.299</score>
+			<level>0</level>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>405</start>
+			<stop>439</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>12.770</score>
+			<level>0</level>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>440</start>
+			<stop>474</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>11.126</score>
+			<level>0</level>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>475</start>
+			<stop>509</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>12.003</score>
+			<level>0</level>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>510</start>
+			<stop>544</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>13.899</score>
+			<level>0</level>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>545</start>
+			<stop>579</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>14.305</score>
+			<level>0</level>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>580</start>
+			<stop>614</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>9.142</score>
+			<level>0</level>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>615</start>
+			<stop>649</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>9.602</score>
+			<level>0</level>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>650</start>
+			<stop>684</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>10.468</score>
+			<level>0</level>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>685</start>
+			<stop>719</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>7.333</score>
+			<level>0</level>
+			<level_tag>R</level_tag>
+		</match>		<match>
+			<sequence_ac>USERSEQ1</sequence_ac>
+			<start>720</start>
+			<stop>754</stop>
+			<signature_ac>PS51375</signature_ac>
+			<signature_id>PPR</signature_id>
+			<score>5.086</score>
+			<level>0</level>
+			<level_tag>R</level_tag>
+		</match>
+	</matchset>
+</scanprosite_response>

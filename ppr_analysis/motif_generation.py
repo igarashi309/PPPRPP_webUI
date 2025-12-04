@@ -243,93 +243,137 @@ def parse_pprfinder_output(motifs_file, protein_fasta, output_dir):
         
     return str(output_pkl)
 
-def run_ps_scan(protein_fasta, output_dir):
-    """
-    Runs PS_Scan on the given protein FASTA.
-    WARNING: This relies on ps_scan.pl and likely Linux binaries. 
-    It might fail on Mac.
-    """
-    deps = check_dependencies()
-    if not deps['perl']:
-        raise RuntimeError("Perl is not installed.")
-        
-    setup_data()
-    
-    bin_dir = DATA_DIR / "bin"
-    profiles_dir = DATA_DIR / "profiles"
-    ps_scan_pl = bin_dir / "ps_scan" / "ps_scan.pl"
-    prosite_dat = profiles_dir / "prosite.dat"
-    
-    if not ps_scan_pl.exists():
-        # Try to find it in the extracted folder
-        # Sometimes it extracts to current dir?
-        # Let's search for it
-        found = list(bin_dir.rglob("ps_scan.pl"))
-        if found:
-            ps_scan_pl = found[0]
-        else:
-            raise RuntimeError("ps_scan.pl not found. Extraction might have failed or structure is different.")
+    return str(ps_out_file)
 
-    # Create output dir
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
+def run_ps_scan_api(protein_fasta, output_dir):
+    """
+    Runs PS_Scan via the ExPASy ScanProsite REST API.
+    This avoids local binary dependencies.
+    """
+    from Bio.ExPASy import ScanProsite
+    from Bio import SeqIO
+    import time
+    
+    # Read sequence
     record = next(SeqIO.parse(protein_fasta, "fasta"))
     seq_id = record.id
+    sequence = str(record.seq)
     
-    # Notebook commands:
-    # cmd=f"perl {pathlib.Path(TMP_DIR).resolve()}/bin/ps_scan/ps_scan.pl -e {s.id} -p {PS_MOTIF} -o pff -d {pathlib.Path(TMP_DIR).resolve()}/profiles/prosite.dat {f} | sort -n -k 2 > {ps_out_file}"
+    print(f"Running PS_Scan API for {seq_id}...")
     
-    ps_out_file = Path(output_dir) / f"{seq_id}_PPR_PSSCAN_pff.log"
-    
-    cmd = [
-        "perl", str(ps_scan_pl),
-        "-e", seq_id,
-        "-p", PS_MOTIF,
-        "-o", "pff",
-        "-d", str(prosite_dat),
-        protein_fasta
-    ]
-    
-    print(f"Running: {' '.join(cmd)}")
-    
-    # We need to pipe output to sort then to file
-    # subprocess with pipe
-    
+    # API call
+    # sig='PS51375' is the PPR motif profile
     try:
-        p1 = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-        p2 = subprocess.Popen(["sort", "-n", "-k", "2"], stdin=p1.stdout, stdout=open(ps_out_file, "w"))
-        p1.stdout.close()
-        p2.communicate()
+        handle = ScanProsite.scan(seq=sequence, sig=PS_MOTIF, mirror='https://prosite.expasy.org', output='xml')
+        xml_result = handle.read()
+        handle.close()
     except Exception as e:
-        raise RuntimeError(f"PS_Scan failed: {e}")
+        raise RuntimeError(f"ScanProsite API failed: {e}")
         
-    # Also need scan output?
-    # cmd=f"perl ... -o scan ... > {ps_out_file_scan}"
-    ps_out_file_scan = Path(output_dir) / f"{seq_id}_PPR_PSSCAN_scan.log"
-    cmd_scan = [
-        "perl", str(ps_scan_pl),
-        "-e", seq_id,
-        "-p", PS_MOTIF,
-        "-o", "scan",
-        "-d", str(prosite_dat),
-        protein_fasta
-    ]
+    # Save XML
+    xml_path = Path(output_dir) / f"{seq_id}_ps_scan.xml"
+    with open(xml_path, "wb") as f:
+        f.write(xml_result)
+        
+    print(f"Saved XML result to {xml_path}")
     
-    try:
-        p1 = subprocess.Popen(cmd_scan, stdout=subprocess.PIPE)
-        p2 = subprocess.Popen(["sort", "-n", "-k", "2"], stdin=p1.stdout, stdout=open(ps_out_file_scan, "w"))
-        p1.stdout.close()
-        p2.communicate()
-    except Exception as e:
-        raise RuntimeError(f"PS_Scan (scan mode) failed: {e}")
+    # Parse XML to generate .pkl
+    return parse_ps_scan_xml(xml_path, protein_fasta, output_dir)
 
-    # Parse output (This is complex logic in the notebook, lines 209-327)
-    # For now, I will implement a simplified version or just return the log files if parsing is too complex to port quickly.
-    # The user asked for "Implement Motif Generation", which implies full functionality.
-    # However, given the risk of PS_Scan not working on Mac (binary dependency), maybe I should prioritize PPRFinder.
+def parse_ps_scan_xml(xml_file, protein_fasta, output_dir):
+    """
+    Parses ScanProsite XML output and converts it to the pickle format.
+    """
+    import xml.etree.ElementTree as ET
+    from Bio.SeqRecord import SeqRecord
+    from Bio.Seq import Seq
+    import pickle
     
-    # I'll add a placeholder for parsing or try to port it if time permits.
-    # For now, let's return the paths.
+    # Read original sequence
+    record = next(SeqIO.parse(protein_fasta, "fasta"))
+    seq_id = record.id
+    sequence_str = str(record.seq)
     
-    return str(ps_out_file)
+    tree = ET.parse(xml_file)
+    root = tree.getroot()
+    
+    parsed_ppr = []
+    
+    # Iterate over matches
+    # Structure: <match> <start> <stop> <signature> ... </match>
+    # Note: ScanProsite XML structure might vary.
+    # Usually: <match_list> <match> ... </match> </match_list>
+    
+    for match in root.findall(".//match"):
+        # Check if it's the correct signature
+        sig_ac = match.find("signature/ac")
+        if sig_ac is not None and sig_ac.text != PS_MOTIF:
+            continue
+            
+        start = int(match.find("start").text)
+        end = int(match.find("stop").text)
+        score = float(match.find("score").text) if match.find("score") is not None else 0.0
+        
+        # Extract sequence
+        # API returns 1-based coordinates? Usually yes.
+        # Python is 0-based.
+        # Let's assume 1-based inclusive from API.
+        safe_start = max(0, start - 1)
+        safe_end = min(len(sequence_str), end)
+        
+        subseq = sequence_str[safe_start:safe_end]
+        
+        # Determine 5th and Last AA
+        # PPR motif is usually 35aa.
+        # If subseq is long enough:
+        # 5th is index 4, Last is index -1
+        
+        fifth = ""
+        last = ""
+        if len(subseq) >= 35:
+             fifth = subseq[4]
+             last = subseq[34] # 35th AA
+        elif len(subseq) >= 5:
+             fifth = subseq[4]
+             last = subseq[-1]
+             
+        mypos = SeqRecord(Seq(subseq), id=seq_id)
+        
+        mypos.annotations = {
+            "PPR_TYPE": "PPR", # PS_Scan doesn't give type like PPRFinder (P, P1, etc), just the motif match
+            "PS_SCORE": score,
+            "PPR_STARTS": safe_start, # 0-based
+            "PPR_ENDS": safe_end,     # 0-based
+            "FIFTH_AA": fifth,
+            "LAST_AA": last,
+            "PPR_CODE": fifth + last,
+        }
+        
+        parsed_ppr.append(mypos)
+        
+    # Save to pickle
+    output_pkl = Path(output_dir) / f"{seq_id}.pkl"
+    with open(output_pkl, "wb") as f:
+        pickle.dump(parsed_ppr, f)
+        
+    # Create a dummy motifs txt for visualization if needed, or just skip
+    # The visualization function expects a specific CSV format.
+    # We can generate it from the parsed data.
+    output_txt = Path(output_dir) / f"{seq_id}_motifs.txt"
+    with open(output_txt, "w") as f:
+        # Columns: header, start, end, score, motif_seq, second, fifth, last, motif_type
+        for p in parsed_ppr:
+            # 1-based start/end for display
+            d_start = p.annotations["PPR_STARTS"] + 1
+            d_end = p.annotations["PPR_ENDS"]
+            score = p.annotations["PS_SCORE"]
+            seq = str(p.seq)
+            fifth = p.annotations["FIFTH_AA"]
+            last = p.annotations["LAST_AA"]
+            # 2nd AA?
+            second = seq[1] if len(seq) > 1 else ""
+            
+            line = f"{seq_id}\t{d_start}\t{d_end}\t{score}\t{seq}\t{second}\t{fifth}\t{last}\tPPR\n"
+            f.write(line)
+            
+    return str(output_pkl)
