@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.0.6] - 2025-12-05
+
+### Fixed
+- **NCBI Analysis**: Fixed a critical bug where NCBI Analysis failed due to incorrect function signature when calling `run_unified_analysis` internally.
+
 ## [v0.0.5] - 2025-12-05
 
 ### Changed

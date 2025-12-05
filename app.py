@@ -753,7 +753,7 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
     try:
         # This is a blocking call, so no updates during this part unless we refactor run_unified_analysis too.
         # But at least the user sees "Running Analysis..." and the logs up to here.
-        result = run_unified_analysis(protein_text, protein_file, rna_text, None, tool_choice, analysis_type, job_name)
+        result = run_unified_analysis(protein_text, protein_file, rna_text, None, tool_choice, scoring_method, allow_gaps, use_ps_score, job_name)
         
         # Unpack result
         msg, df, csv_path, fig_browser, fig_detail, df_state, motif_df, motif_fig = result
@@ -1044,7 +1044,7 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
     ncbi_btn.click(
         run_ncbi_analysis,
         inputs=[ncbi_accession, prot_text, prot_file, tool_select, scoring_method, allow_gaps, use_ps_score, job_name_input],
-        outputs=[status_output, ncbi_fasta_download, ncbi_bedgraph_download, ncbi_bed_download, ncbi_gff_download, ncbi_download, ncbi_log_output] 
+        outputs=[ncbi_log_output, ncbi_fasta_download, ncbi_bedgraph_download, ncbi_bed_download, ncbi_gff_download, ncbi_download, ncbi_log_output] 
     )
     
     print(f"DEBUG: plot_browser type: {type(plot_browser)}")
