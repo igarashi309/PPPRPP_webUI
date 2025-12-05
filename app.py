@@ -8,6 +8,23 @@ import tempfile
 import pickle
 import numpy as np
 from pathlib import Path
+import glob
+from Bio import SeqIO
+import io
+
+def cleanup_temp_files():
+    """Cleans up temporary files from previous runs."""
+    patterns = ["*.csv", "*.fasta", "*.bedgraph", "*.bed", "*.gff3"]
+    count = 0
+    for pattern in patterns:
+        for f in glob.glob(os.path.join(tempfile.gettempdir(), pattern)):
+            try:
+                os.remove(f)
+                count += 1
+            except Exception as e:
+                print(f"Error deleting {f}: {e}")
+    if count > 0:
+        print(f"Cleaned up {count} temporary files.")
 
 # Import package modules
 from ppr_analysis import core, io as ppr_io, visualization, config, motif_generation, ncbi
@@ -20,6 +37,14 @@ print(f"Gradio Version: {gr.__version__}")
 # --- Constants ---
 TMP_DIR = tempfile.gettempdir()
 
+DEFAULT_PROTEIN = """>PPR791(Rf1a)_IR24
+MARRAASRAVGALRSDGSIQGRGGRAGGSGAEDARHVFDELLRRGRGASIYGLNRALADVARDSPAAAVSRYNRMARAGADEVTPDLCTYGILIGCCCRAGRLDLGFAALGNVIKKGFRVDAIAFTPLLKGLCADKRTSDAMDIVLRRMTELGCIPNVFSYNILLKGLCDENRSQEALELLHMMADDRGGGSPPDVVSYTTVINGFFKEGDSDKAYSTYHEMLDRGILPDVVTYNSIIAALCKAQAMDKAMEVLNTMVKNGVMPDCMTYNSILHGYCSSGQPKEAIGFLKKMRSDGVEPDVVTYSLLMDYLCKNGRCMEARKIFDSMTKRGLKPEITTYGTLLQGYATKGALVEMHGLLDLMVRNGIHPDHYVFSILICAYAKQGKVDQAMLVFSKMRQQGLNPNAVTYGAVIGILCKSGRVEDAMLYFEQMIDEGLSPGNIVYNSLIHGLCTCNKWERAEELILEMLDRGICLNTIFFNSIIDSHCKEGRVIESEKLFELMVRIGVKPNVITYNTLINGYCLAGKMDEAMKLLSGMVSVGLKPNTVTYSTLINGYCKISRMEDALVLFKEMESSGVSPDIITYNIILQGLFQTRRTAAAKELYVRITESGTQIELSTYNIILHGLCKNKLTDDALQMFQNLCLMDLKLEARTFNIMIDALLKVGRNDEAKDLFVAFSSNGLVPNYWTYRLMAENIIGQGLLEELDQLFLSMEDNGCTVDSGMLNFIVRELLQRGEITRAGTYLSMIDEKHFSLEASTASLFIDLLSGGKYQEYYRFLPEKYKSFIESLSC"""
+
+DEFAULT_RNA = """>atp6-orf79_BT
+ataactataggattctcacgagaaggcttcaaatcaagcaatccacaagacaagcgagttcactatcatagttgatccttgactgcttccttcacggtaatggtcctcctaggataggatatgagcgaacatagtcaattacagatatgcgaactgttggaaagcactagtttcgaagaaaaagagtagcaagggattcgaaacagacaaagcctatgaacaagagtaaggactgcaacgattagagagagtagggagtaccgttcattaccgattagagagagtagggagtaccgaacagcctctagtactgcttgctatcatagagaagggagtaccgaacagcctctagtactgctatctacacaccctctagtaccgctatcgtagagaatctagtacagctatctacgagacgagaaaaggaaacgatttgatttttcacacaagacctagccattgcattggtttagttaagtaattgcatttccgcttcagctgcccttgcttttccttcacccaaaaggctctctttcggctgtacccatcccggagggatgccaggtactgctcttcaggttaagagaaacagtcattgcattgttgaataagggaaagtggaattgttgaatcagccctcgcctggtgcctaccaataatacttcataattgcgtatatagaagggaggggagaggtactctatcttgttaacttactgtttttttctcctagctgggtttttcattttattctcttagagataatgctctccagaagagctcgtaatgaattggattcgaaccaatatctcaatgcgacttatccattagtcgatcattgcgacttatccattagtcgatcatcacgggaggaaccgccaccacgggttcccggccgccctcccaccttgtaggggtgggatatttgcctggtccaccagaattccatagtatggttttgtaatgaaagtatgagcaaaccaccactgtcctgtctttcttacttaggaaagactacacgaatagaggtgccccaccacgaatagtcaacctctatagggtgcccggcttttatattatgatctatgattttttccattaaagccgggtcgtacagaggggcctgatactttagcaaagcaaacaacagggcgcctcctacaacgacaccgaagatgaaatatggaagaccgttagtccctcgggtagtggagaagagccatcggaccagatttgccatagcacaataaaataatatttttaagctccgctctccttatattggagagacttgtttggggtcggcgttggtttttccaacgaaaaacgaattcgaacatgaaatgaaaaaacaaatgctagttgtcattttttgtaacgcaatacacttccgcgtttgtcccgccccctaaaatcttcggctcctcgtttttattcaattatgaaattactcattttgatggagatttatagcatcattcaagtaaatacaaattgagatcgtagaaacatgagcttgtaatatagctacacctaattccagaccggttaatgctagaactataaataagggaccaagatctcctatgaaatagaaaatattattcagaaatagcatagtccaagcgaacccacttaaaatctttactgaactatgaccggccatcatattagcaaataaacgtattcctgagcttaatgcacgaaaacaatgagagattagctcaaggagtactaaaaaaggtgctaatggcagtgggactcccgctggtaataagaagctaaaaaaatgaagcccatgtctttgaaatccaacgatcgtaatgcctataaaaatggaaaatgaaagagccaaagtaatgagaaaatgacttgtcactgtgaagctaaagggtatcataccctggggattacgaaataacgaaaaagtaaaagtgaccgagatgcgagggaaaaacttttgtttaacatttccacctatttgttcgtttaccaggttcagcacgaaatcataaataagctctaccaaggattgccatgcatttggcactgactttcccccgccctttttcgtaacaactccaaataaagatggcaccaaaacgacagttaccgccatagacaaggattcatttgtgaatgataaataaaagttacccatatcaagaccaaataatggatcaatgaaaaattgatccaaggggcttgaaattactggtccgccgcctccagggataactatatcgccgttcctccattcagccccatctaacaactctattccgttctgccagttattgaaacggatacgctgcgccctctcaaatggttcaaaaaaagcgtctatttctgcttgtctccttctcttcaacgagttcacgttataatcattgaggagtttccagatcgagtctctctgattcaaacccattattaccacatgattgtgatcgaaattcattggaatttcccatctttttaagctctgctcctagaaagggagactgatctcaactggcctcggtttttccaaggaaactctatctttagtagcgatcacatggcgtcgacccaacggaaaacatactatactactatgaacatttcagaatggaaaacgaaactgaacactttccaatactggtttcggatggcttatgtgcatcgatttttctcaatcttcgtaggggcttgacgtataggttccccaacctatcctaaaactctagtctagtgaaggcggggccaacaaatgacctcttgagtgagattacatcccagagcctgcctattcaatgccactcctggtaagatccattttcaccgatacccgctctctatatatgagtttctggaaatggttatctcacaagcaaagaaggaattcaaattctacccctcagaagaaccttcaagcagtacaacccacagatgatgaagtgaacaggacttcttttcttatatttgcctgttgaactccggcagcaagtgccttccttactagtgaggtcttgcttttgcttctttggttggtactcttctatctgggactgggaaagatctttctgcattaacggaattaggcttactcctcagaaagccctactactttactctaggcctagtagttatagctaactcactgctattggttgggatgaatttccctaccctcgccctacgtggtttagaagagtagtataagtaaggaagcctgataatcatataggcaaaaggcaccctgtcccagacaaaccagacaggcagcaaatttcactaaggcagtaaagcattctgatactcctatacagacaaggctgtaacccaatccgaccagcctctcggaataccgaataggcaaagtacggaatcaaaatcaaggggacaaggagcctaccaagtacggcaacaaaagaaagaaagacgagacagcgctacgcttgttcaccaaaggtcaagat"""
+
+DEFAULT_ACCESSION = "AP017386"
+
 # --- Logic Functions ---
 
 def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_choice, analysis_type, job_name):
@@ -29,6 +54,8 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
             protein_input = f.read()
     else:
         protein_input = protein_text
+        if not protein_input:
+            protein_input = DEFAULT_PROTEIN
 
     if not protein_input:
         return "Error: Please provide a protein sequence.", None, None, None, None, None
@@ -42,6 +69,8 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
             rna_input = f.read()
     else:
         rna_input = rna_text
+        if not rna_input:
+            rna_input = DEFAULT_RNA
 
     if not rna_input:
         return "Error: Please provide an RNA sequence.", None, None, None, None, None
@@ -113,56 +142,92 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
         rna_seq = str(rna_record.seq).upper().replace("U", "T") # Convert to DNA for analysis if needed, or keep RNA. Core usually expects DNA/RNA string.
     except Exception as e:
         # Fallback if raw sequence or malformed FASTA
-        rna_seq = rna_input.strip().upper().replace("U", "T")
+        # If it looks like FASTA (starts with >), try to strip header manually
+        clean_input = rna_input.strip()
+        if clean_input.startswith(">"):
+             parts = clean_input.split("\n", 1)
+             if len(parts) > 1:
+                 # Remove header, join lines to remove newlines
+                 rna_seq = "".join(parts[1].splitlines()).upper().replace("U", "T")
+             else:
+                 rna_seq = ""
+        else:
+             # Raw sequence, remove newlines
+             rna_seq = "".join(clean_input.splitlines()).upper().replace("U", "T")
 
-    all_scores = []
-    predicted_scores = [] # Default empty, or could allow manual input. For unified, we assume default/empty.
+    # Initialize all_scores as a dict of lists
+    all_scores = {
+        "Position_Relative": [],
+        "PPR_Binding_Score": [],
+        "PPR_Name": [],
+        "Motif_Labels": [],
+        "Motif_Labels_GAP": [],
+        "Gap_Size": [],
+        "Segment": [],
+        "PPR_Motif_Scores": [],
+        "Total_Score": [],
+        "PPR_Binding_Scores_List": [],
+        "Predicted PPR Motif Scores List": [],
+        "Motif_Confidence_Scores": [],
+        "Strand": [],
+        "Genome_Position": []
+    }
+    
+    predicted_scores = [] # Default empty
     
     try:
         # Forward
         scores_fwd = core.analyze_ppr_data(motif_data, rna_seq, min_front, min_back, max_gap, predicted_scores, ppr_name)
         if analysis_type in scores_fwd:
-            for s in scores_fwd[analysis_type]:
-                row = list(s)
-                row.append("Forward")
-                row.append(row[0]) # Genome_Position for forward is same as relative
-                all_scores.append(row)
+            fwd_data = scores_fwd[analysis_type]
+            # Extend all_scores with fwd_data
+            for k, v in fwd_data.items():
+                 if k in all_scores:
+                     all_scores[k].extend(v)
+            
+            # Add Strand and Genome_Position columns
+            num_fwd = len(fwd_data["Position_Relative"])
+            all_scores["Strand"].extend(["Forward"] * num_fwd)
+            all_scores["Genome_Position"].extend(fwd_data["Position_Relative"]) # Same for fwd
         
         # Reverse
         rev_seq = core.get_reverse_complement(rna_seq)
         scores_rev = core.analyze_ppr_data(motif_data, rev_seq, min_front, min_back, max_gap, predicted_scores, ppr_name)
         if analysis_type in scores_rev:
-            for s in scores_rev[analysis_type]:
-                row = list(s)
-                row.append("Reverse")
-                genome_pos = len(rna_seq) - 1 - row[0] # Adjust position for reverse strand
-                row.append(genome_pos)
-                all_scores.append(row)
+            rev_data = scores_rev[analysis_type]
+            for k, v in rev_data.items():
+                 if k in all_scores:
+                     all_scores[k].extend(v)
+            
+            num_rev = len(rev_data["Position_Relative"])
+            all_scores["Strand"].extend(["Reverse"] * num_rev)
+            # Genome position for reverse: len(seq) - 1 - relative
+            seq_len = len(rna_seq)
+            rev_genome_pos = [seq_len - 1 - p for p in rev_data["Position_Relative"]]
+            all_scores["Genome_Position"].extend(rev_genome_pos)
                 
     except Exception as e:
         import traceback
         traceback.print_exc()
         return f"Error during analysis: {e}", None, None, None, None, None, None, None
-
-    if not all_scores:
+    if not all_scores["Position_Relative"]:
         return "Error: No binding sites found.", None, None, None, None, None, None, None
 
     # Create DataFrame
-    columns = [
-        "Position_Relative", "PPR_Binding_Score", "PPR_Name", "Motif_Labels",
-        "Motif_Labels_GAP", "Gap_Size", "Segment", "PPR_Motif_Scores",
-        "Total_Score", "PPR_Binding_Scores_List", "Predicted PPR Motif Scores List",
-        "Motif_Confidence_Scores", # Added
-        "Strand", "Genome_Position"
-    ]
-    df = pd.DataFrame(all_scores, columns=columns)
-
-    # CSV
-    csv_path = f"{seq_id}_{analysis_type}.csv"
-    df.to_csv(csv_path, index=False)
+    df_output = pd.DataFrame(all_scores)
+    
+    # Add Analysis Type
+    df_output['Analysis_Type'] = analysis_type
+    
+    # Filter for significant hits (optional, but good for default view)
+    # For now, return all or top hits. Let's return all.
+    
+    # Save to CSV
+    csv_path = os.path.join(TMP_DIR, f"{job_name}_results.csv")
+    df_output.to_csv(csv_path, index=False)
 
     # 5. Visualization (Genome Browser)
-    fig = plot_genome_browser(df, seq_id, analysis_type)
+    fig = plot_genome_browser(df_output, seq_id, analysis_type)
     
     # 6. Visualize Motifs
     motif_df, motif_fig = pd.DataFrame(), go.Figure()
@@ -171,7 +236,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     else:
         status_msg += "\nWarning: Motif details file not found for visualization."
 
-    return "Analysis Complete", df, csv_path, fig, go.Figure(), df, motif_df, motif_fig
+    return "Analysis Complete", df_output, csv_path, fig, go.Figure(), df_output, motif_df, motif_fig
     
 def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis"):
     """Helper to plot the genome browser."""
@@ -209,11 +274,167 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis"):
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<extra></extra>"
             ))
 
+    # Calculate symmetric Y-axis range
+    max_score = df['PPR_Binding_Score'].abs().max() if not df.empty else 10
+    # Add a small buffer (10%)
+    y_limit = max_score * 1.1
+    
     fig.update_layout(
         title=f"Genome Browser - {seq_id}",
         xaxis_title="Genomic Position",
         yaxis_title="Binding Score (+ / -)",
+        yaxis=dict(range=[-y_limit, y_limit]), # Symmetric Y-axis
         height=600,
+        hovermode="closest"
+    )
+    return fig
+
+def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_types=None, plot_height=600):
+    """Plots binding scores and gene annotations for a specific range."""
+    if feature_types is None:
+        feature_types = ["gene", "CDS", "tRNA", "rRNA", "exon"]
+        
+    fig = go.Figure()
+    
+    # 1. Plot Binding Scores
+    # Filter DF for range
+    df_range = df[(df['Genome_Position'] >= start) & (df['Genome_Position'] <= end)]
+    
+    unique_ppr_names = df['PPR_Name'].unique()
+    colors = px.colors.qualitative.Plotly
+    
+    for i, name in enumerate(unique_ppr_names):
+        color = colors[i % len(colors)]
+        
+        # Forward
+        df_fwd = df_range[(df_range['PPR_Name'] == name) & (df_range['Strand'] == "Forward")]
+        if not df_fwd.empty:
+            fig.add_trace(go.Scatter(
+                x=df_fwd['Genome_Position'],
+                y=df_fwd['PPR_Binding_Score'],
+                mode='markers',
+                name=f"{name} (+)",
+                marker=dict(color=color, size=8, symbol='circle'),
+                hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: +<extra></extra>"
+            ))
+            
+        # Reverse
+        df_rev = df_range[(df_range['PPR_Name'] == name) & (df_range['Strand'] == "Reverse")]
+        if not df_rev.empty:
+            fig.add_trace(go.Scatter(
+                x=df_rev['Genome_Position'],
+                y=-df_rev['PPR_Binding_Score'],
+                mode='markers',
+                name=f"{name} (-)",
+                marker=dict(color=color, size=8, symbol='x'),
+                hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<extra></extra>"
+            ))
+
+    # Calculate symmetric Y-axis range (Global max to match main browser)
+    max_score = df['PPR_Binding_Score'].abs().max() if not df.empty else 10
+    y_limit = max_score * 1.1
+    
+    # 2. Plot Gene Annotations from GFF3
+    if gff_path and os.path.exists(gff_path):
+        features = ncbi.parse_gff(gff_path, start, end)
+        
+        # Determine Y-position for genes (Central placement)
+        # Place genes near Y=0. Forward slightly above, Reverse slightly below.
+        # Use a small offset based on y_limit.
+        offset = y_limit * 0.05
+        gene_y_fwd = offset
+        gene_y_rev = -offset
+        
+        for feat in features:
+            f_type = feat['type']
+            if f_type not in feature_types:
+                continue
+                
+            f_start = max(start, feat['start'])
+            f_end = min(end, feat['end'])
+            f_strand = feat['strand']
+            f_name = feat['attributes'].get('Name', feat['attributes'].get('ID', f_type))
+            
+            # Color by type
+            if f_type == 'CDS': color = 'orange'
+            elif f_type == 'tRNA': color = 'green'
+            elif f_type == 'rRNA': color = 'purple'
+            elif f_type == 'gene': color = 'blue'
+            else: color = 'gray'
+            
+            if f_strand == '+':
+                y_pos = gene_y_fwd
+                symbol = 'triangle-right'
+                # Draw arrow head at end? No, just use shape.
+            else:
+                y_pos = gene_y_rev
+                symbol = 'triangle-left'
+                
+            # Draw gene as an arrow (SVG path)
+            # Make it thicker for visibility
+            thickness = y_limit * 0.02
+            half_thick = thickness
+            
+            # Arrow head size
+            # Fixed size relative to view width (1%)
+            view_width = end - start
+            head_len = view_width * 0.01
+            
+            # Ensure head doesn't exceed gene length (for very short genes)
+            head_len = min(head_len, f_end - f_start)
+            
+            if f_strand == '+':
+                # Right arrow >
+                # Points: (start, top), (end-head, top), (end, mid), (end-head, bottom), (start, bottom)
+                y_top = y_pos + half_thick
+                y_bot = y_pos - half_thick
+                y_mid = y_pos
+                
+                x_start = f_start
+                x_end = f_end
+                x_head_base = max(f_start, f_end - head_len)
+                
+                path = f"M {x_start},{y_top} L {x_head_base},{y_top} L {x_end},{y_mid} L {x_head_base},{y_bot} L {x_start},{y_bot} Z"
+                
+            else:
+                # Left arrow <
+                # Points: (start+head, top), (end, top), (end, bottom), (start+head, bottom), (start, mid)
+                y_top = y_pos + half_thick
+                y_bot = y_pos - half_thick
+                y_mid = y_pos
+                
+                x_start = f_start
+                x_end = f_end
+                x_head_base = min(f_end, f_start + head_len)
+                
+                path = f"M {x_head_base},{y_top} L {x_end},{y_top} L {x_end},{y_bot} L {x_head_base},{y_bot} L {x_start},{y_mid} Z"
+
+            fig.add_shape(
+                type="path",
+                path=path,
+                line=dict(color=color, width=1),
+                fillcolor=color,
+                opacity=0.6
+            )
+            
+            # Add label (above for fwd, below for rev)
+            label_y = y_pos + (thickness * 2.5) if f_strand == '+' else y_pos - (thickness * 2.5)
+            
+            fig.add_annotation(
+                x=(f_start + f_end) / 2,
+                y=label_y,
+                text=f_name,
+                showarrow=False,
+                font=dict(color="black", size=10),
+            )
+
+    fig.update_layout(
+        title=f"Range Inspector ({start} - {end})",
+        xaxis_title="Genomic Position",
+        yaxis_title="Binding Score (+ / -)",
+        xaxis=dict(range=[start, end]),
+        yaxis=dict(range=[-y_limit, y_limit]), # Symmetric Y-axis
+        height=plot_height,
         hovermode="closest"
     )
     return fig
@@ -305,7 +526,13 @@ def generate_detail_figure(row):
     try:
         def parse_list_col(val):
             if isinstance(val, list): return val
-            return [float(x) for x in str(val).split(',')]
+            if pd.isna(val) or val == "": return []
+            s = str(val).strip()
+            if s.startswith('[') and s.endswith(']'):
+                s = s[1:-1]
+            if not s.strip():
+                return []
+            return [float(x) for x in s.split(',')]
 
         scores = parse_list_col(row['PPR_Motif_Scores'])
         
@@ -376,8 +603,13 @@ def generate_detail_figure(row):
                 yaxis='y2'
             ))
         
+        # Get Analysis Type if available
+        analysis_type_str = ""
+        if 'Analysis_Type' in row and pd.notna(row['Analysis_Type']):
+            analysis_type_str = f" | Analysis: {row['Analysis_Type']}"
+
         fig.update_layout(
-            title=f"Detail: {row['PPR_Name']} at {row['Genome_Position']} ({row['Strand']})<br>Total Score: {total_score:.2f}",
+            title=f"Detail: {row['PPR_Name']} at {row['Genome_Position']} ({row['Strand']})<br>Total Score: {total_score:.2f}{analysis_type_str}",
             xaxis_title="Position / Nucleotide",
             yaxis_title="Binding Score",
             yaxis2=dict(
@@ -459,39 +691,40 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, ana
     log_buffer = []
     
     # Helper to construct the output tuple
-    # Outputs: [status_output, ncbi_fasta_download, ncbi_bedgraph_download, ncbi_gff_download, ncbi_df_output, ncbi_download, plot_browser, ncbi_log_output]
-    def make_output(status, fasta=None, bedgraph=None, gff=None, df=None, csv=None, fig=None):
+    # Outputs: [status_output, ncbi_fasta_download, ncbi_bedgraph_download, ncbi_bed_download, ncbi_gff_download, ncbi_download, ncbi_log_output]
+    def make_output(status, fasta=None, bedgraph=None, bed=None, gff=None, csv=None):
         return (
             status, 
             fasta, 
             bedgraph,
+            bed,
             gff,
-            df, 
-            csv, 
-            fig, 
+            csv,
             "\n".join(log_buffer)
         )
 
     def log(message):
         log_buffer.append(message)
-        print(message)
+        # We can yield intermediate status updates if we want, but for now just append to log
         
-    # 1. Fetch FASTA from NCBI
+    # 1. Fetch Genome (FASTA)
+    if not accession_id:
+        accession_id = DEFAULT_ACCESSION
+        
     try:
-        log(f"Fetching {accession_id} from NCBI...")
-        yield make_output("Fetching...")
-        
-        fasta_path = ncbi.fetch_fasta(accession_id, output_dir=TMP_DIR)
-        log(f"Fetched FASTA: {fasta_path}")
-        yield make_output("Fetched FASTA.")
+        log(f"Fetching genome for {accession_id}...")
+        yield make_output(f"Fetching genome for {accession_id}...")
+        fasta_path = ncbi.fetch_fasta(accession_id, TMP_DIR)
+        log(f"Genome fetched: {fasta_path}")
+        yield make_output(f"Genome fetched. Running analysis...", fasta=fasta_path)
         
     except Exception as e:
-        err_msg = f"Error fetching from NCBI: {e}"
+        err_msg = f"Error fetching genome from NCBI: {e}"
         log(err_msg)
         yield make_output(err_msg)
         return
         
-    # 2. Read the fetched FASTA content
+    # 2. Read the fetched FASTA content (now it's the genome)
     try:
         with open(fasta_path, "r") as f:
             rna_text = f.read()
@@ -515,7 +748,14 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, ana
         # Unpack result
         msg, df, csv_path, fig_browser, fig_detail, df_state, motif_df, motif_fig = result
         log(f"Analysis result: {msg}")
-        yield make_output("Analysis Finished.", df=df, csv=csv_path, fig=fig_browser)
+        
+        # Optimize for UI: Truncate DataFrame if too large
+        # Full data is in CSV.
+        ui_df = df.head(1000) if df is not None else None
+        if df is not None and len(df) > 1000:
+            log(f"Truncating DataFrame for UI display (showing 1000 of {len(df)} rows). Full data in CSV.")
+            
+        yield make_output("Analysis Finished.", csv=csv_path)
         
     except Exception as e:
         err_msg = f"Error during unified analysis: {e}"
@@ -533,43 +773,108 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, ana
         
     log(f"Analysis complete. DataFrame shape: {df.shape}")
         
-    # 4. Generate bedGraph for IGV
+    # 4. Generate bedGraph and BED for IGV
+    bedgraph_path = None
+    bed_path = None
     try:
         bedgraph_path = os.path.join(TMP_DIR, f"{accession_id}_{job_name}.bedgraph")
-        log(f"Generating bedGraph at {bedgraph_path}...")
-        yield make_output("Generating bedGraph...", df=df, csv=csv_path, fig=fig_browser)
+        bed_path = os.path.join(TMP_DIR, f"{accession_id}_{job_name}.bed")
         
+        log(f"Generating bedGraph and BED files...")
+        yield make_output("Generating visualization files...", csv=csv_path)
+        
+        from Bio import SeqIO
+        record = next(SeqIO.parse(fasta_path, "fasta"))
+        chrom_id = record.id
+        log(f"Chromosome ID from FASTA: {chrom_id}")
+        
+        # BedGraph (Forward only for now, or maybe separate?)
+        # Original logic was Forward only. Let's keep it consistent for BedGraph or improve?
+        # User asked for strand distinction. BedGraph is usually one value per pos.
+        # BED is better for strand distinction.
+        
+        # Write BedGraph (Forward binding score)
         with open(bedgraph_path, "w") as f:
-            f.write(f"track type=bedGraph name='{analysis_type}' description='PPR Binding Score' visibility=full color=0,0,255\n")
-            
-            from Bio import SeqIO
-            record = next(SeqIO.parse(fasta_path, "fasta"))
-            chrom_id = record.id
-            log(f"Chromosome ID from FASTA: {chrom_id}")
-            
+            f.write(f"track type=bedGraph name='{analysis_type}_Score' description='PPR Binding Score' visibility=full color=0,0,255 autoScale=on viewLimits=0:30\n")
             df_fwd = df[df['Strand'] == 'Forward']
-            count = 0
             for _, row in df_fwd.iterrows():
                 pos = int(row['Genome_Position'])
                 score = float(row['PPR_Binding_Score'])
                 f.write(f"{chrom_id}\t{pos}\t{pos+1}\t{score}\n")
-                count += 1
-            log(f"Written {count} records to bedGraph.")
+                
+        # Write BED (Reads visualization with Strand)
+        with open(bed_path, "w") as f:
+            # Track line: itemRgb=On to use colors
+            f.write(f"track name='{analysis_type}_Sites' description='PPR Binding Sites' visibility=pack itemRgb=On useScore=1\n")
             
+            count = 0
+            for _, row in df.iterrows():
+                # BED format: chrom, chromStart, chromEnd, name, score, strand, thickStart, thickEnd, itemRgb
+                
+                strand = row['Strand']
+                score_val = float(row['PPR_Binding_Score'])
+                
+                # Scale score 0-30 -> 0-1000 for shading (optional)
+                bed_score = int(min(score_val * 33, 1000))
+                
+                if strand == 'Forward':
+                    start = int(row['Genome_Position'])
+                    # Length of segment. 'Segment' column has the sequence.
+                    length = len(row['Segment'])
+                    end = start + length
+                    strand_char = "+"
+                    color = "0,0,255" # Blue
+                else:
+                    # Reverse: Genome_Position is the 5' end on the reverse strand (high coordinate)
+                    # Wait, let's check core.py logic.
+                    # core.py: genome_pos = len(rna_seq) - 1 - row[0]
+                    # This is the index in the forward sequence corresponding to the start of the motif match on the reverse complement?
+                    # No, let's be careful.
+                    # If we have a match on reverse strand at relative pos `i` (0-based from 5' of reverse seq):
+                    # The corresponding index in forward seq (0-based from 5') is `len - 1 - i`.
+                    # This is the coordinate of the base paired with the 5' end of the reverse match.
+                    # So it's the high coordinate (3' end on forward strand).
+                    
+                    # BED chromStart/End are 0-based, half-open on Forward Strand.
+                    # If we have a reverse feature of length L ending at `high_coord` (inclusive):
+                    # chromEnd = high_coord + 1
+                    # chromStart = chromEnd - L
+                    
+                    high_coord = int(row['Genome_Position']) # This is the index on forward strand
+                    length = len(row['Segment'])
+                    
+                    chromEnd = high_coord + 1
+                    chromStart = chromEnd - length
+                    
+                    start = chromStart
+                    end = chromEnd
+                    strand_char = "-"
+                    color = "255,0,0" # Red
+                
+                name = f"{row['PPR_Name']}_{score_val:.1f}"
+                
+                # Write BED line
+                f.write(f"{chrom_id}\t{start}\t{end}\t{name}\t{bed_score}\t{strand_char}\t{start}\t{end}\t{color}\n")
+                count += 1
+                
+            log(f"Written {count} records to BED file.")
+
     except Exception as e:
-        err_msg = f"Error generating bedGraph: {e}"
+        err_msg = f"Error generating visualization files: {e}"
         log(err_msg)
-        yield make_output(err_msg, df=df, csv=csv_path, fig=fig_browser)
+        import traceback
+        log(traceback.format_exc())
+        yield make_output(err_msg, csv=csv_path)
         return
             
     # Return paths for download
-    log(f"Ready for download: {fasta_path}, {bedgraph_path}")
+    log(f"Ready for download: {fasta_path}, {bedgraph_path}, {bed_path}")
     
     # 5. Fetch GFF3 (Annotations)
     gff3_path = None
     try:
         log(f"Fetching GFF3 annotations for {accession_id}...")
-        yield make_output("Fetching GFF3...", df=df, csv=csv_path, fig=fig_browser)
+        yield make_output("Fetching GFF3...", csv=csv_path)
         gff3_path = ncbi.fetch_gff(accession_id, output_dir=TMP_DIR)
         if gff3_path:
             log(f"Fetched GFF3: {gff3_path}")
@@ -579,7 +884,7 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, ana
         log(f"Warning: Failed to fetch GFF3: {e}")
         # Don't fail the whole analysis for this
     
-    yield make_output("Done", fasta=fasta_path, bedgraph=bedgraph_path, df=df, csv=csv_path, fig=fig_browser, gff=gff3_path)
+    yield make_output("Done", fasta=fasta_path, bedgraph=bedgraph_path, bed=bed_path, csv=csv_path, gff=gff3_path)
 
 # --- UI Definition ---
 
@@ -590,13 +895,13 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
     with gr.Row():
         with gr.Column():
             gr.Markdown("### 1. Protein Input (Motif Discovery)")
-            prot_text = gr.Textbox(label="Protein FASTA", lines=5, placeholder=">ProteinID\\nSEQUENCE...")
+            prot_text = gr.Textbox(label="Protein FASTA", lines=5, placeholder=f"Default: >PPR791(Rf1a)_IR24\\n{DEFAULT_PROTEIN[:50]}...")
             prot_file = gr.File(label="Or Upload Protein File")
             tool_select = gr.Dropdown(choices=["PPRFinder", "PS_Scan"], value="PPRFinder", label="Discovery Tool")
             
         with gr.Column():
             gr.Markdown("### 2. RNA Input (Target Analysis)")
-            rna_text = gr.Textbox(label="RNA FASTA", lines=5, placeholder=">RNA_ID\\nSEQUENCE...")
+            rna_text = gr.Textbox(label="RNA FASTA", lines=5, placeholder=f"Default: >atp6-orf79_BT\\n{DEFAULT_RNA[:50]}...")
             rna_file = gr.File(label="Or Upload RNA File")
             
     with gr.Row():
@@ -646,29 +951,81 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
         gr.Markdown("Enter an NCBI Accession ID to fetch the sequence and analyze binding sites. Download the generated FASTA and BedGraph files to view them in the [IGV Desktop Application](https://igv.org/doc/desktop/).")
         
         with gr.Row():
-            ncbi_accession = gr.Textbox(label="NCBI Accession ID", placeholder="e.g., NC_000932", value="NC_000932")
+            ncbi_accession = gr.Textbox(label="NCBI Accession ID", placeholder=f"Default: {DEFAULT_ACCESSION}")
             ncbi_btn = gr.Button("Fetch & Analyze", variant="primary")
         
         with gr.Row():
             ncbi_fasta_download = gr.File(label="Download FASTA (Reference Genome)")
             ncbi_bedgraph_download = gr.File(label="Download BedGraph (Binding Scores)")
+            ncbi_bed_download = gr.File(label="Download BED (Binding Sites)") # Added
             ncbi_gff_download = gr.File(label="Download GFF3 (Gene Annotations)")
         
         with gr.Row():
             ncbi_log_output = gr.Textbox(label="Analysis Log", lines=10, interactive=False)
         
         with gr.Row():
-            ncbi_df_output = gr.DataFrame(label="Results Summary")
             ncbi_download = gr.File(label="Download CSV")
             
-        # Reuse protein inputs from the main tab (or duplicate them if needed for clarity)
-        # For simplicity, let's assume the user sets the protein in the main tab or we duplicate the inputs here.
-        # Duplicating might be safer to avoid confusion.
-        
-        with gr.Accordion("Analysis Settings (Same as Main Tab)", open=False):
-             # We can just link to the main tab's inputs in the click handler
-             pass
+        with gr.Accordion("Range Inspector", open=False):
+            gr.Markdown("Inspect a specific genomic range with gene annotations.")
+            with gr.Row():
+                range_start = gr.Number(label="Start Position", value=132162, precision=0)
+                range_end = gr.Number(label="End Position", value=135622, precision=0)
+                range_btn = gr.Button("Inspect Range")
+            
+            with gr.Row():
+                feature_types = gr.CheckboxGroup(
+                    ["gene", "CDS", "tRNA", "rRNA", "exon"], 
+                    value=["gene", "CDS", "tRNA", "rRNA"], 
+                    label="Show Features"
+                )
+                plot_height = gr.Slider(minimum=400, maximum=1200, value=600, step=50, label="Plot Height (px)")
+                
+            range_plot = gr.Plot(label="Range Browser")
+            
+            def on_range_click(accession, start, end, csv_file, gff_file, features, height):
+                if not csv_file:
+                    return go.Figure(layout=dict(title="No CSV file found. Run analysis first."))
+                try:
+                    df = pd.read_csv(csv_file.name)
+                    # GFF file object or path?
+                    gff_path = gff_file.name if gff_file else None
+                    return plot_range_browser(df, gff_path, int(start), int(end), accession, features, int(height))
+                except Exception as e:
+                    return go.Figure(layout=dict(title=f"Error: {e}"))
 
+            range_btn.click(
+                on_range_click,
+                inputs=[ncbi_accession, range_start, range_end, ncbi_download, ncbi_gff_download, feature_types, plot_height],
+                outputs=[range_plot]
+            )
+            
+        with gr.Accordion("Inspect Specific Site", open=False):
+            gr.Markdown("View detailed binding scores for a specific position.")
+            with gr.Row():
+                with gr.Column(scale=1):
+                    ncbi_manual_pos = gr.Number(label="Genome Position", precision=0)
+                    ncbi_manual_strand = gr.Radio(["Forward", "Reverse"], value="Forward", label="Strand")
+                    ncbi_manual_btn = gr.Button("Show Detail")
+                with gr.Column(scale=3):
+                    ncbi_detail_plot = gr.Plot(label="Site Detail")
+                    ncbi_detail_seq = gr.Textbox(label="Binding Sequence", interactive=True)
+            
+            def on_ncbi_detail_click(csv_file, pos, strand):
+                if not csv_file:
+                    return go.Figure(layout=dict(title="No CSV file found. Run analysis first.")), ""
+                try:
+                    df = pd.read_csv(csv_file.name)
+                    return show_manual_detail(pos, strand, df)
+                except Exception as e:
+                    return go.Figure(layout=dict(title=f"Error: {e}")), ""
+
+            ncbi_manual_btn.click(
+                on_ncbi_detail_click,
+                inputs=[ncbi_download, ncbi_manual_pos, ncbi_manual_strand],
+                outputs=[ncbi_detail_plot, ncbi_detail_seq]
+            )
+        
     # Events
     run_btn.click(
         run_unified_analysis,
@@ -679,7 +1036,7 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
     ncbi_btn.click(
         run_ncbi_analysis,
         inputs=[ncbi_accession, prot_text, prot_file, tool_select, analysis_select, job_name_input],
-        outputs=[status_output, ncbi_fasta_download, ncbi_bedgraph_download, ncbi_gff_download, ncbi_df_output, ncbi_download, plot_browser, ncbi_log_output] 
+        outputs=[status_output, ncbi_fasta_download, ncbi_bedgraph_download, ncbi_bed_download, ncbi_gff_download, ncbi_download, ncbi_log_output] 
     )
     
     print(f"DEBUG: plot_browser type: {type(plot_browser)}")
@@ -700,4 +1057,6 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch(share=True, inbrowser=True)
+    cleanup_temp_files()
+    # Enable queue for long-running tasks and launch
+    demo.queue().launch(share=False, inbrowser=True)

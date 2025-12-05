@@ -78,27 +78,47 @@ def save_scores_to_csv(all_scores, output_dir="."):
         "Total_Score", "PPR_Binding_Scores_List", "Predicted PPR Motif Scores List"
     ]
 
-    for key, rows in all_scores.items():
+    for key, data in all_scores.items():
         output_path = os.path.join(output_dir, f"{key}.csv")
+        
+        # data is now a dict of columns
+        # We need to iterate over rows
+        if not data or not data["Position_Relative"]:
+            continue
+            
+        num_rows = len(data["Position_Relative"])
         
         with open(output_path, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(headers)
             
-            for row in rows:
-                # row is a tuple/list matching the order in core.py
-                # (pos, ppr_binding_score, ppr_name, motif_labels_str, motif_labels_gap, gap_size, segment, ppr_motif_scores, total_score, motif_binding_score_list, predicted_scores)
+            # Columns in order of headers
+            # Headers: Position, PPR_Binding_Score, PPR_Name, Motif_Labels, ...
+            # Map headers to data keys
+            # Note: Headers in CSV are slightly different from keys in dict?
+            # Dict keys: Position_Relative, PPR_Binding_Score, PPR_Name, Motif_Labels, Motif_Labels_GAP, Gap_Size, Segment, PPR_Motif_Scores, Total_Score, PPR_Binding_Scores_List, Predicted PPR Motif Scores List
+            # CSV Headers: Position, PPR_Binding_Score, PPR_Name, Motif_Labels, Motif_Labels_GAP, Gap_Size, Segment, PPR_Motif_Scores, Total_Score, PPR_Binding_Scores_List, Predicted PPR Motif Scores List
+            
+            # Mapping
+            col_map = [
+                "Position_Relative", "PPR_Binding_Score", "PPR_Name", "Motif_Labels", 
+                "Motif_Labels_GAP", "Gap_Size", "Segment", "PPR_Motif_Scores", 
+                "Total_Score", "PPR_Binding_Scores_List", "Predicted PPR Motif Scores List"
+            ]
+            
+            # Prepare columns for iteration
+            cols = [data[k] for k in col_map]
+            
+            # Iterate
+            for i in range(num_rows):
+                row = [c[i] for c in cols]
                 
-                # We need to format lists as strings to match previous behavior
-                # row[7] is PPR_Motif_Scores (list)
-                # row[9] is PPR_Binding_Scores_List (list)
-                # row[10] is Predicted PPR Motif Scores List (list)
+                # Format lists as strings
+                # Indices: 7 (PPR_Motif_Scores), 9 (PPR_Binding_Scores_List), 10 (Predicted...)
+                row[7] = ','.join(map(str, row[7]))
+                row[9] = ','.join(map(str, row[9]))
+                row[10] = ','.join(map(str, row[10]))
                 
-                formatted_row = list(row)
-                formatted_row[7] = ','.join(map(str, row[7]))
-                formatted_row[9] = ','.join(map(str, row[9]))
-                formatted_row[10] = ','.join(map(str, row[10]))
-                
-                writer.writerow(formatted_row)
+                writer.writerow(row)
                 
         print(f"Saved {output_path}")

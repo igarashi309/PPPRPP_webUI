@@ -18,3 +18,11 @@ venv/
 *.swp
 .idea/
 .vscode/
+
+# Analysis Output Files
+*.csv
+*.fasta
+*.bedgraph
+*.bed
+*.gff3
+temp/

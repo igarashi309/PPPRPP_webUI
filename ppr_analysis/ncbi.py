@@ -77,7 +77,45 @@ def fetch_gff(accession_id, email="example@example.com", output_dir="."):
         with open(output_path, "w") as f:
             f.write(record)
             
-        print(f"Saved to {output_path}")
+        print(f"Saved raw GFF3 to {output_path}")
+        
+        # Post-process to flatten GFF3 (remove Parent from exon/CDS to avoid intron lines)
+        try:
+            flattened_lines = []
+            with open(output_path, "r") as f:
+                for line in f:
+                    if line.startswith("#"):
+                        flattened_lines.append(line)
+                        continue
+                        
+                    parts = line.strip().split("\t")
+                    if len(parts) < 9:
+                        flattened_lines.append(line)
+                        continue
+                        
+                    feature_type = parts[2]
+                    attributes = parts[8]
+                    
+                    if feature_type in ["exon", "CDS"]:
+                        # Remove Parent attribute
+                        new_attrs = []
+                        for attr in attributes.split(";"):
+                            if not attr.startswith("Parent="):
+                                new_attrs.append(attr)
+                        parts[8] = ";".join(new_attrs)
+                        flattened_lines.append("\t".join(parts) + "\n")
+                    else:
+                        flattened_lines.append(line)
+                        
+            # Overwrite with flattened content
+            with open(output_path, "w") as f:
+                f.writelines(flattened_lines)
+                
+            print(f"Flattened GFF3 saved to {output_path}")
+            
+        except Exception as e:
+            print(f"Warning: Failed to flatten GFF3: {e}")
+            
         return str(output_path)
         
     except Exception as e:
@@ -85,3 +123,67 @@ def fetch_gff(accession_id, email="example@example.com", output_dir="."):
         print(f"Warning: Failed to fetch GFF3 directly: {e}")
         # Maybe try 'gff'?
         return None
+
+def parse_gff(gff_path, start, end):
+    """
+    Parses a GFF3 file and returns features within the specified range.
+    
+    Args:
+        gff_path (str): Path to the GFF3 file.
+        start (int): Start position of the range.
+        end (int): End position of the range.
+        
+    Returns:
+        list: List of dictionaries representing features.
+              [{'type': 'gene', 'start': 100, 'end': 500, 'strand': '+', 'attributes': {...}}, ...]
+    """
+    features = []
+    if not gff_path or not os.path.exists(gff_path):
+        return features
+        
+    try:
+        with open(gff_path, "r") as f:
+            for line in f:
+                if line.startswith("#"):
+                    continue
+                    
+                parts = line.strip().split("\t")
+                if len(parts) < 9:
+                    continue
+                    
+                # GFF3 columns: seqid, source, type, start, end, score, strand, phase, attributes
+                try:
+                    f_start = int(parts[3])
+                    f_end = int(parts[4])
+                except ValueError:
+                    continue
+                    
+                # Check overlap with range
+                if f_end < start or f_start > end:
+                    continue
+                    
+                f_type = parts[2]
+                # Filter for relevant types
+                if f_type not in ["gene", "CDS", "tRNA", "rRNA", "exon"]:
+                    continue
+                    
+                f_strand = parts[6]
+                attributes_str = parts[8]
+                attributes = {}
+                for attr in attributes_str.split(";"):
+                    if "=" in attr:
+                        key, val = attr.split("=", 1)
+                        attributes[key] = val
+                        
+                features.append({
+                    'type': f_type,
+                    'start': f_start,
+                    'end': f_end,
+                    'strand': f_strand,
+                    'attributes': attributes
+                })
+                
+    except Exception as e:
+        print(f"Error parsing GFF3: {e}")
+        
+    return features

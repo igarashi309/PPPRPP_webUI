@@ -304,15 +304,48 @@ def parse_ps_scan_xml(xml_file, protein_fasta, output_dir):
     # Note: ScanProsite XML structure might vary.
     # Usually: <match_list> <match> ... </match> </match_list>
     
-    for match in root.findall(".//match"):
+    # Handle namespaces if present
+    # The XML from API usually has xmlns="urn:expasy:scanprosite" in matchset
+    namespaces = {'ns': 'urn:expasy:scanprosite'}
+    
+    # Try finding with namespace first
+    matches = root.findall(".//ns:match", namespaces)
+    if not matches:
+        # Fallback to no namespace if not found (or if format changed)
+        matches = root.findall(".//match")
+    
+    for match in matches:
+        # Helper to get text with or without namespace
+        def get_text(elem, tag):
+            t = elem.find(f"ns:{tag}", namespaces)
+            if t is None:
+                t = elem.find(tag)
+            return t.text if t is not None else None
+            
         # Check if it's the correct signature
-        sig_ac = match.find("signature/ac")
-        if sig_ac is not None and sig_ac.text != PS_MOTIF:
+        sig_ac = get_text(match, "signature/ac")
+        # Sometimes signature is nested differently or we just check signature_ac direct child
+        if sig_ac is None:
+             # Try deeper?
+             sig = match.find("ns:signature", namespaces)
+             if sig:
+                 ac = sig.find("ns:ac", namespaces)
+                 if ac is not None:
+                     sig_ac = ac.text
+        
+        if sig_ac is not None and sig_ac != PS_MOTIF:
             continue
             
-        start = int(match.find("start").text)
-        end = int(match.find("stop").text)
-        score = float(match.find("score").text) if match.find("score") is not None else 0.0
+        start_text = get_text(match, "start")
+        end_text = get_text(match, "stop")
+        score_text = get_text(match, "score")
+        
+        if not start_text or not end_text:
+            continue
+            
+        start = int(start_text)
+        end = int(end_text)
+        score = float(score_text) if score_text else 0.0
         
         # Extract sequence
         # API returns 1-based coordinates? Usually yes.
@@ -324,17 +357,15 @@ def parse_ps_scan_xml(xml_file, protein_fasta, output_dir):
         subseq = sequence_str[safe_start:safe_end]
         
         # Determine 5th and Last AA
-        # PPR motif is usually 35aa.
-        # If subseq is long enough:
-        # 5th is index 4, Last is index -1
+        # Based on optimization: 5th is index 5, Last is index 31 (0-based) relative to PS51375 match
         
         fifth = ""
         last = ""
-        if len(subseq) >= 35:
-             fifth = subseq[4]
-             last = subseq[34] # 35th AA
-        elif len(subseq) >= 5:
-             fifth = subseq[4]
+        if len(subseq) > 31:
+             fifth = subseq[5]
+             last = subseq[31]
+        elif len(subseq) >= 6:
+             fifth = subseq[5]
              last = subseq[-1]
              
         mypos = SeqRecord(Seq(subseq), id=seq_id)
