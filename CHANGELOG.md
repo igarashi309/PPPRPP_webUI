@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.0.5] - 2025-12-05
+
+### Changed
+- **Analysis Selection UI**: Replaced the single dropdown with intuitive Radio buttons and Checkboxes for "Scoring Method", "Allow Gaps", and "Use Motif Confidence Score". This allows for 8 clear combinations of analysis parameters.
+
+### Fixed
+- **Score Calculation**: Fixed a bug where `Total_Score` incorrectly included the Motif Confidence Score (PS Score) even when "Use Motif Confidence Score" was disabled.
+
 ## [v0.0.4] - 2025-12-05
 
 ### Added

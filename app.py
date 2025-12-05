@@ -47,7 +47,12 @@ DEFAULT_ACCESSION = "AP017386"
 
 # --- Logic Functions ---
 
-def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_choice, analysis_type, job_name):
+def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_choice, scoring_method, allow_gaps, use_ps_score, job_name):
+    # Construct analysis_type string
+    method = scoring_method.lower()
+    gap_str = "gap" if allow_gaps else "gap0"
+    ps_str = "ps" if use_ps_score else "no_ps"
+    analysis_type = f"{method}_{gap_str}_{ps_str}"
     # 1. Process Protein Input (Discovery)
     if protein_file is not None:
         with open(protein_file.name, 'r') as f:
@@ -682,7 +687,12 @@ def show_manual_detail(position, strand, df):
 # --- IGV Helper Removed ---
 # def generate_igv_html(fasta_path, bedgraph_path, locus_id): ...
 
-def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, analysis_type, job_name):
+def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, scoring_method, allow_gaps, use_ps_score, job_name):
+    # Construct analysis_type string
+    method = scoring_method.lower()
+    gap_str = "gap" if allow_gaps else "gap0"
+    ps_str = "ps" if use_ps_score else "no_ps"
+    analysis_type = f"{method}_{gap_str}_{ps_str}"
     """
     Orchestrates the analysis starting from an NCBI Accession ID.
     Yields updates for real-time logging in Gradio.
@@ -907,11 +917,9 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
     with gr.Row():
         with gr.Column():
             gr.Markdown("### 3. Settings & Run")
-            analysis_opts = [
-                'kobayashi_gap0_ps', 'kobayashi_gap_ps', 'kobayashi_gap0_no_ps', 'kobayashi_gap_no_ps',
-                'yan_gap0_ps', 'yan_gap_ps', 'yan_gap0_no_ps', 'yan_gap_no_ps'
-            ]
-            analysis_select = gr.Dropdown(choices=analysis_opts, value='kobayashi_gap0_ps', label="Analysis Type")
+            scoring_method = gr.Radio(["Kobayashi", "Yan"], value="Kobayashi", label="Scoring Method")
+            allow_gaps = gr.Checkbox(label="Allow Gaps", value=False)
+            use_ps_score = gr.Checkbox(label="Use Motif Confidence Score (+Score)", value=True)
             job_name_input = gr.Textbox(value="my_analysis", label="Job Name")
             run_btn = gr.Button("Run Unified Analysis", variant="primary")
             
@@ -1029,13 +1037,13 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
     # Events
     run_btn.click(
         run_unified_analysis,
-        inputs=[prot_text, prot_file, rna_text, rna_file, tool_select, analysis_select, job_name_input],
+        inputs=[prot_text, prot_file, rna_text, rna_file, tool_select, scoring_method, allow_gaps, use_ps_score, job_name_input],
         outputs=[status_output, df_output, csv_output, plot_browser, plot_detail, df_state, motif_table, motif_plot]
     )
     
     ncbi_btn.click(
         run_ncbi_analysis,
-        inputs=[ncbi_accession, prot_text, prot_file, tool_select, analysis_select, job_name_input],
+        inputs=[ncbi_accession, prot_text, prot_file, tool_select, scoring_method, allow_gaps, use_ps_score, job_name_input],
         outputs=[status_output, ncbi_fasta_download, ncbi_bedgraph_download, ncbi_bed_download, ncbi_gff_download, ncbi_download, ncbi_log_output] 
     )
     

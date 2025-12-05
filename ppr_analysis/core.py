@@ -360,6 +360,7 @@ def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_v
              # Recompute total if needed (sum of base scores)
              # all_base_scores_matrix sum along axis 1
              ppr_binding_score_col = np.sum(all_base_scores_matrix, axis=1).tolist()
+             total_score_col = ppr_binding_score_col
              
         # Segment
         # This is the slow part: creating 500k substrings.
