@@ -16,22 +16,19 @@ Before running, ensure you have the following installed:
     - **Mac**: `brew install hmmer`
     - **Linux**: `sudo apt install hmmer`
     - **Windows**: Download HMMER binaries (http://hmmer.org/) and add to your system PATH, or run this tool inside WSL (Windows Subsystem for Linux).
-    - **Mac**: `brew install hmmer`
-    - **Linux**: `sudo apt install hmmer`
-    - **Windows**: Download HMMER binaries (http://hmmer.org/) and add to your system PATH, or run this tool inside WSL (Windows Subsystem for Linux).
+    -   **Mac**: `brew install hmmer`
+    -   **Linux**: `sudo apt install hmmer`
+    -   **Windows**: Please use **WSL (Windows Subsystem for Linux)**. Native Windows support is not available. Install `hmmer` inside WSL using `sudo apt install hmmer`.
 
 ## How to Run
 
-### Mac / Linux
+### Mac / Linux / WSL
 1.  Open Terminal.
 2.  Navigate to this folder.
 3.  Run the launch script:
     ```bash
     bash setup_and_run.sh
     ```
-
-### Windows
-1.  Double-click `setup_and_run.bat`.
 
 The script will automatically:
 1.  Create a Python virtual environment (`venv`).
@@ -42,5 +39,5 @@ The script will automatically:
 ## Troubleshooting
 
 - **"Java not found"**: Install Java and ensure `java` command works in terminal/cmd.
-- **"hmmsearch not found"**: Install HMMER. On Windows, this is the most common issue; using WSL is recommended if native binaries are hard to configure.
+-   **"hmmsearch not found"**: Install HMMER. On Windows, ensure you are running in WSL.
 - **Browser doesn't open**: Look for a URL in the console output (e.g., `http://127.0.0.1:7860`) and open it manually.
