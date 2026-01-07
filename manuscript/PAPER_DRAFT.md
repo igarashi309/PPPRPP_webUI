@@ -13,7 +13,7 @@ To address this, we developed a unified software package that automates the work
 ## Materials and Methods
 
 ### Software Architecture
-The application is built using **Python 3.10+** and utilizes the **Gradio** framework for its web-based graphical user interface (GUI). It runs locally on Windows, macOS, and Linux systems.
+The application is built using **Python 3.10+** and utilizes the **Gradio** framework for its web-based graphical user interface (GUI). It runs on macOS and Linux systems (including WSL for Windows users).
 
 ### Motif Discovery
 Motif identification was performed using **PPRFinder** (Gutmann et al., 2020) and **PS_Scan** (ScanProsite) (de Castro et al., 2006).
