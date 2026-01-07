@@ -16,12 +16,16 @@ To address this, we developed a unified software package that automates the work
 The application is built using **Python 3.10+** and utilizes the **Gradio** framework for its web-based graphical user interface (GUI). It runs locally on Windows, macOS, and Linux systems.
 
 ### Motif Discovery
-For motif identification, the tool integrates **PPRFinder** (Gutmann et al., 2020), which employs HMMER (Hidden Markov Model) profiles trained on comprehensive plant PPR datasets. This allows for high-sensitivity detection of canonical (P, L, S) and variant (P1, L1, S1, SS, etc.) motifs. Alternatively, users can opt for **PS_Scan** (ScanProsite) (de Castro et al., 2006) using the standard PROSITE signature (PS51375), accessed via a REST API to minimize local dependencies.
+Motif identification was performed using **PPRFinder** (Gutmann et al., 2020) and **PS_Scan** (ScanProsite) (de Castro et al., 2006).
 
 ### Target Prediction Algorithms
 The software implements two distinct scoring models tailored to different functional classes of PPR proteins:
-1.  **PLS-type (Kobayashi et al., 2019)**: Optimized for PLS-class proteins involved in RNA editing. This method calculates binding scores based on the specific amino acid residues at positions 5 and 35 (or last) of the motif, which are critical for recognizing the target base and the upstream context of the editing site.
-2.  **P-type (Yan et al., 2019)**: Designed for P-class proteins. This method utilizes the combinatorial "PPR code" to predict binding affinity to specific RNA sequences.
+1.  **PLS-type (Kobayashi et al., 2019)**: Optimized for PLS-class proteins involved in RNA editing. Binding scores were calculated using the probability scores for 2-letter amino acid combinations (positions 5 and 35/last) defined in the Supplementary Data of Kobayashi et al. (2019).
+2.  **P-type (Yan et al., 2019)**: Designed for P-class proteins. Binding scores were derived from the dissociation constant ($K_d$) values obtained from Isothermal Titration Calorimetry (ITC) analysis by Yan et al. (2019). The binding probability ($P_{base}$) for each base was calculated as follows:
+    1.  Missing $K_d$ values were assigned a penalty value of 99,999 $\mu M$.
+    2.  The reciprocal of the $K_d$ value was taken to represent affinity ($A = 1/K_d$).
+    3.  Values were normalized to sum to 1 across the four bases:
+        $$P_{base} = \frac{1/K_{d,base}}{\sum_{n \in \{A,C,G,U\}} (1/K_{d,n})}$$
 
 ### Visualization
 Binding results are visualized using **Plotly**, enabling interactive exploration of the genome. Users can view binding scores across the entire RNA sequence or zoom into specific genomic ranges. The tool also generates BedGraph and BED files for compatibility with the **Integrative Genomics Viewer (IGV)**.
