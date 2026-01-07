@@ -26,12 +26,18 @@ def generate_gap_variations(motif_labels, ppr_scores, min_front, min_back, max_g
     """
     Generates variations of motif labels with gaps.
     """
-    gap_variations = [(motif_labels, ppr_scores, 0)]  # GAP 0
-    for gap_size in range(1, max_gap + 1):
+    gap_variations = [(motif_labels, ppr_scores, 0, 0)]  # GAP 0, Pos 0
+
+    
+    # Optimization: User requested ONLY Gap 0 and Gap N (target).
+    # Skip intermediate gaps (1..N-1) to save time.
+    target_gaps = [max_gap] if max_gap > 0 else []
+    
+    for gap_size in target_gaps:
         for front_size in range(min_front, len(motif_labels) - min_back + 1):
             gap_variation = motif_labels[:front_size] + ['--'] * gap_size + motif_labels[front_size:]
             gap_scores = ppr_scores[:front_size] + [0] * gap_size + ppr_scores[front_size:]
-            gap_variations.append((gap_variation, gap_scores, gap_size))
+            gap_variations.append((gap_variation, gap_scores, gap_size, front_size))
     return gap_variations
 
 def calculate_binding_score_numpy(rna_seq, motif_binding_scores, motif_labels, ppr_scores):
@@ -209,7 +215,7 @@ def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_v
     all_scores = []
     rna_seq = dna_to_rna(fasta_sequence)
 
-    for motif_labels, ppr_scores, gap_size in motif_labels_variations:
+    for motif_labels, ppr_scores, gap_size, gap_pos in motif_labels_variations:
         # Use NumPy calculation
         total_scores, windows, score_matrix = calculate_binding_score_numpy(rna_seq, motif_binding_scores, motif_labels, ppr_scores)
         
@@ -240,7 +246,7 @@ def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_v
         
         # Optimization:
         # The return format is:
-        # (pos, ppr_binding_score, ppr_name, motif_labels, motif_labels_gap, gap_size, segment, ppr_motif_scores, total_score, motif_binding_score_list, predicted_scores, ppr_scores)
+        # (pos, ppr_binding_score, ppr_name, motif_labels, motif_labels_gap, gap_size, segment, ppr_motif_scores, total_score, motif_binding_score_list, predicted_scores, ppr_scores, gap_pos)
         
         # Most of these are constant or simple.
         # segment, ppr_motif_scores, motif_binding_score_list vary.
@@ -344,6 +350,7 @@ def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_v
         motif_labels_col = [','.join(motif_labels)] * num_sites
         motif_labels_gap_col = [motif_labels_gap] * num_sites
         gap_size_col = [gap_size] * num_sites
+        gap_pos_col = [gap_pos] * num_sites
         predicted_scores_col = [predicted_scores] * num_sites
         ppr_scores_col = [ppr_scores] * num_sites
         
@@ -408,7 +415,8 @@ def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_v
                 "Total_Score": [],
                 "PPR_Binding_Scores_List": [],
                 "Predicted PPR Motif Scores List": [],
-                "Motif_Confidence_Scores": []
+                "Motif_Confidence_Scores": [],
+                "Gap_Index": [] # Add new column
             }
             
         all_scores["Position_Relative"].extend(pos_col)
@@ -423,6 +431,7 @@ def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_v
         all_scores["PPR_Binding_Scores_List"].extend(motif_binding_score_list_col)
         all_scores["Predicted PPR Motif Scores List"].extend(predicted_scores_col)
         all_scores["Motif_Confidence_Scores"].extend(ppr_scores_col)
+        all_scores["Gap_Index"].extend(gap_pos_col)
 
     return all_scores
 
@@ -443,7 +452,7 @@ def analyze_ppr_data(motif_data, fasta_sequence, min_front, min_back, max_gap, p
     motif_labels = motif_data['motif_labels']
     ppr_scores = motif_data['ppr_scores']
     
-    gap0_variations = [(motif_labels, ppr_scores, 0)]
+    gap0_variations = [(motif_labels, ppr_scores, 0, 0)]
     gap_variations = generate_gap_variations(motif_labels, ppr_scores, min_front, min_back, max_gap)
     
     scores = {
