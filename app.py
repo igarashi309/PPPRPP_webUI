@@ -47,11 +47,11 @@ DEFAULT_ACCESSION = "AP017386"
 
 # --- Logic Functions ---
 
-def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_choice, scoring_method, allow_gaps, use_ps_score, job_name):
+def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name):
     # Construct analysis_type string
     method_map = {"PLS-type": "kobayashi", "P-type": "yan"}
     method = method_map.get(scoring_method, scoring_method).lower()
-    gap_str = "gap" if allow_gaps else "gap0"
+    gap_str = "gap" if max_gap_size > 0 else "gap0"
     ps_str = "ps" if use_ps_score else "no_ps"
     analysis_type = f"{method}_{gap_str}_{ps_str}"
     # 1. Process Protein Input (Discovery)
@@ -133,9 +133,9 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
         return f"Error loading motifs: {e}", None, None, None, None, None, None, None
 
     # Run Analysis (Both Strands)
-    min_front = 7
-    min_back = 7
-    max_gap = 0
+    min_front = 1 # Allow gaps closer to ends
+    min_back = 1
+    max_gap = max_gap_size
     
     # Prepare RNA sequence
     # rna_input is already defined from rna_text or rna_file earlier.
@@ -160,7 +160,9 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
         else:
              # Raw sequence, remove newlines
              rna_seq = "".join(clean_input.splitlines()).upper().replace("U", "T")
-
+    
+             rna_seq = "".join(clean_input.splitlines()).upper().replace("U", "T")
+    
     # Initialize all_scores as a dict of lists
     all_scores = {
         "Position_Relative": [],
@@ -169,11 +171,11 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
         "Motif_Labels": [],
         "Motif_Labels_GAP": [],
         "Gap_Size": [],
+        "Gap_Index": [], # New Column
         "Segment": [],
         "PPR_Motif_Scores": [],
         "Total_Score": [],
         "PPR_Binding_Scores_List": [],
-        "Predicted PPR Motif Scores List": [],
         "Motif_Confidence_Scores": [],
         "Strand": [],
         "Genome_Position": []
@@ -186,7 +188,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
         scores_fwd = core.analyze_ppr_data(motif_data, rna_seq, min_front, min_back, max_gap, predicted_scores, ppr_name)
         if analysis_type in scores_fwd:
             fwd_data = scores_fwd[analysis_type]
-            # Extend all_scores with fwd_data
+            # Extend all_scores with fwd_data (Dict)
             for k, v in fwd_data.items():
                  if k in all_scores:
                      all_scores[k].extend(v)
@@ -201,6 +203,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
         scores_rev = core.analyze_ppr_data(motif_data, rev_seq, min_front, min_back, max_gap, predicted_scores, ppr_name)
         if analysis_type in scores_rev:
             rev_data = scores_rev[analysis_type]
+            # Extend all_scores with rev_data (Dict)
             for k, v in rev_data.items():
                  if k in all_scores:
                      all_scores[k].extend(v)
@@ -454,6 +457,10 @@ def visualize_motifs(motifs_file):
         col_names = ['Header', 'Start', 'End', 'Score', 'Sequence', '2nd', '5th', 'Last', 'Type']
         df = pd.read_csv(motifs_file, sep='\t', names=col_names, header=None)
         
+        fasta_name = "Unknown Sequence"
+        if not df.empty:
+             fasta_name = df.iloc[0]['Header'].lstrip('>')
+        
         if df.empty:
              return pd.DataFrame(), go.Figure()
 
@@ -482,8 +489,31 @@ def visualize_motifs(motifs_file):
         }
         
         # Draw motifs as rectangles
-        for _, row in df.iterrows():
-            color = color_map.get(row['Type'], '#bcbd22')
+        # Normalize scores for color calculation
+        max_search_score = df['Score'].max() if not df.empty else 100
+        min_search_score = df['Score'].min() if not df.empty else 0
+        # If min is negative, handle? Usually E-value derived scores might be positive.
+        # Let's assume scores are roughly comparable.
+        
+        # Color scale: Blue (Low) -> Red (High)
+        # We can use Plotly's sample colors or interpolate.
+        # Low=Blue, High=Red.
+        
+        for i, row in df.iterrows():
+            motif_num = i + 1
+            val = row['Score']
+
+            # Map score to color 'rgba(r, g, b, 0.8)'
+            # Simple interpolation: Blue(0,0,255) to Red(255,0,0)
+            if max_search_score == min_search_score:
+                fraction = 1.0
+            else:
+                fraction = (val - min_search_score) / (max_search_score - min_search_score)
+                fraction = max(0, min(1, fraction))
+            
+            r = int(fraction * 255)
+            b = int((1 - fraction) * 255)
+            color_str = f"rgba({r}, 0, {b}, 0.8)"
             
             # Rectangle
             fig.add_shape(
@@ -491,39 +521,75 @@ def visualize_motifs(motifs_file):
                 x0=row['Start'], x1=row['End'],
                 y0=-0.2, y1=0.2,
                 line=dict(color="black", width=1),
-                fillcolor=color,
-                opacity=0.8
+                fillcolor=color_str,
+                opacity=1.0 # Color handles opacity look
             )
             
-            # Text (Code)
+            # Text (Code) - Center
             fig.add_annotation(
                 x=(row['Start'] + row['End']) / 2,
                 y=0,
-                text=row['Code'],
+                text=f"<b>{row['Code']}</b>",
                 showarrow=False,
                 font=dict(color="white", size=10)
             )
             
-            # Text (Type) - above
+            # Text (Number) - Above (Removed Type)
+            # " #1 "
             fig.add_annotation(
                 x=(row['Start'] + row['End']) / 2,
-                y=0.3,
-                text=row['Type'],
+                y=0.35,
+                text=f"<b>#{motif_num}</b>",
+                showarrow=False,
+                font=dict(color="black", size=9)
+            )
+            
+            # Text (Score) - Below
+            # User requested to make it clear it's Motif Confidence Score
+            fig.add_annotation(
+                x=(row['Start'] + row['End']) / 2,
+                y=-0.45,
+                text=f"Conf:<br><b>{row['Score']:.1f}</b>",
                 showarrow=False,
                 font=dict(color="black", size=8)
             )
 
+        # Add invisible Scatter to generate Colorbar
+        # Use a point that exists but is invisible
+        mid_x = (df['Start'].min() + df['End'].max()) / 2 if not df.empty else 0
+        fig.add_trace(go.Scatter(
+            x=[mid_x], y=[0],
+            mode='markers',
+            marker=dict(
+                colorscale=[[0, 'blue'], [1, 'red']],
+                cmin=min_search_score,
+                cmax=max_search_score,
+                size=0, # Invisible dot
+                opacity=0, 
+                showscale=True,
+                colorbar=dict(
+                    title=dict(text="Confidence Score", side="right"),
+                    len=0.75
+                )
+            ),
+            hoverinfo='skip',
+            showlegend=False
+        ))
+
         fig.update_layout(
-            title="Predicted PPR Motifs",
+            title=f"Motif Architecture: {fasta_name}",
             xaxis_title="Amino Acid Position",
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-0.5, 0.5]),
-            height=250,
-            margin=dict(l=20, r=20, t=40, b=20)
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-0.6, 0.6]),
+            height=300,
+            margin=dict(l=20, r=20, t=60, b=40)
         )
         
+        # Removed 'Header' from return to hide it, also user wanted "unneeded".
         return df[['Type', 'Start', 'End', 'Score', '5th', 'Last', 'Code', 'Sequence']], fig
         
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"Error visualizing motifs: {e}")
         return pd.DataFrame(), go.Figure()
 
@@ -546,6 +612,7 @@ def generate_detail_figure(row):
         if not scores:
             scores = parse_list_col(row['PPR_Binding_Scores_List'])
             
+        # Parse motif labels (handle string vs list)
         motif_labels = row['Motif_Labels_GAP'].split(',') if isinstance(row['Motif_Labels_GAP'], str) else row['Motif_Labels_GAP']
         segment = row['Segment']
         total_score = row['Total_Score']
@@ -560,6 +627,17 @@ def generate_detail_figure(row):
         colors = []
         text_labels = []
         
+        # Calculate Motif Numbers (skip gaps)
+        # We need to reconstruct the original motif index (1-based)
+        motif_numbers = []
+        current_idx = 1
+        for label in motif_labels:
+            if label == '--':
+                motif_numbers.append(None)
+            else:
+                motif_numbers.append(current_idx)
+                current_idx += 1
+        
         # Define color map for common PPR motifs
         color_map = {
             'P': '#1f77b4',  # Blue
@@ -572,23 +650,41 @@ def generate_detail_figure(row):
             'S1': '#c5b0d5', # Light Purple
             'S2': '#8c564b', # Brown
             'SS': '#e377c2', # Pink
-            '--': '#7f7f7f'  # Gray (Gap)
+            '--': '#d3d3d3'  # Light Gray (Gap)
         }
         
         for i, label in enumerate(motif_labels):
-            # X-axis: Nucleotide + Index (1-based relative to site)
+            # X-axis: Nucleotide + Index + Motif Number
             nuc = segment[i] if i < len(segment) else "-"
-            x_labels.append(f"{i+1}<br><b>{nuc}</b>")
             
-            # Color
-            colors.append(color_map.get(label, '#bcbd22')) # Default to Olive if unknown
+            # Construct label
+            # If gap, explicitly show GAP
+            if label == '--':
+                m_num_str = "(Gap)"
+                text_label = "GAP"
+                color = color_map['--']
+            else:
+                m_num = motif_numbers[i]
+                m_num_str = f"#{m_num}" if m_num else ""
+                text_label = f"{m_num_str}<br>{label}"
+                color = color_map.get(label, '#bcbd22')
+
+            # X label: Position (1-based relative) <br> Nucleotide <br> Motif #
+            x_labels.append(f"{i+1}<br><b>{nuc}</b><br><span style='font-size:10px'>{m_num_str}</span>")
             
-            # Text on bar
-            text_labels.append(label)
+            # Colors list
+            colors.append(color)
+            
+            # Text on bar (Motif Type)
+            text_labels.append(label if label != '--' else 'GAP')
 
         fig = go.Figure()
         
         # Bar chart for Binding Scores
+        # If score is 0, bar won't show. Add a small value for GAP visibility?
+        # Or just rely on x-axis labels.
+        # Let's add a separate trace for Gaps if needed, but text_labels help.
+        
         fig.add_trace(go.Bar(
             x=x_labels, 
             y=scores, 
@@ -611,11 +707,34 @@ def generate_detail_figure(row):
         
         # Get Analysis Type if available
         analysis_type_str = ""
+        # Improved formatting for Analysis Type and Site details
         if 'Analysis_Type' in row and pd.notna(row['Analysis_Type']):
-            analysis_type_str = f" | Analysis: {row['Analysis_Type']}"
+             atype = row['Analysis_Type']
+             # Parse: method_gap_ps
+             parts = atype.split('_')
+             
+             # Method
+             method_map = {'kobayashi': 'PLS-type', 'yan': 'P-type'}
+             method_name = method_map.get(parts[0], parts[0].capitalize())
+             
+             # Gap
+             gap_str_raw = parts[1] if len(parts) > 1 else ""
+             # Check ps
+             # User requested clearer label for Motif Confidence Score (+PS)
+             ps_str = "Weighted by Confidence" if "no_ps" not in atype else "Unweighted"
+             
+             if 'no_ps' in atype:
+                 ps_str = "Unweighted"
+             elif 'ps' in atype:
+                 ps_str = "Weighted by Confidence"
+             
+             analysis_type_str = f" | Method: {method_name} ({ps_str})"
 
+        gap_size = row.get('Gap_Size', 0)
+        gap_info = f" | Gap Size: {gap_size}"
+        
         fig.update_layout(
-            title=f"Detail: {row['PPR_Name']} at {row['Genome_Position']} ({row['Strand']})<br>Total Score: {total_score:.2f}{analysis_type_str}",
+            title=f"Site: {row['Genome_Position']} ({row['Strand']}){gap_info} | Score: {total_score:.2f}{analysis_type_str}",
             xaxis_title="Position / Nucleotide",
             yaxis_title="Binding Score",
             yaxis2=dict(
@@ -655,12 +774,20 @@ def update_detail_plot(evt: gr.SelectData, df):
         return go.Figure(layout=dict(title=f"Error: {e}")), ""
 
 def show_manual_detail(position, strand, df):
-    """Show detail for a manually entered position and strand."""
+    """
+    Finds available site variations at the given position and strand.
+    Returns: 
+    1. Plot (Initial best) 
+    2. Sequence
+    3. Dropdown choices
+    4. Dropdown value (selected)
+    """
     if df is None or df.empty:
-        return go.Figure(layout=dict(title="No analysis data available. Please run analysis first.")), ""
+        empty_fig = go.Figure(layout=dict(title="No analysis data available."))
+        return empty_fig, "", gr.update(choices=[], value=None), gr.update(choices=[], value=None)
     
     if position is None:
-        return go.Figure(layout=dict(title="Please enter a position")), ""
+        return go.Figure(layout=dict(title="Please enter a position")), "", gr.update(choices=[], value=None), gr.update(choices=[], value=None)
 
     try:
         # Find rows at this position and strand
@@ -668,33 +795,110 @@ def show_manual_detail(position, strand, df):
         rows = df[(df['Genome_Position'] == target_pos) & (df['Strand'] == strand)]
         
         if rows.empty:
-            # Check if position exists in any strand to give better error
-            any_rows = df[df['Genome_Position'] == target_pos]
-            if not any_rows.empty:
-                 available_strands = any_rows['Strand'].unique()
-                 return go.Figure(layout=dict(title=f"No binding sites found at {target_pos} ({strand}). Found in: {', '.join(available_strands)}")), ""
+            return go.Figure(layout=dict(title=f"No binding sites found at {target_pos} ({strand})")), "", gr.update(choices=[], value=None), gr.update(choices=[], value=None)
             
-            min_pos = df['Genome_Position'].min()
-            max_pos = df['Genome_Position'].max()
-            return go.Figure(layout=dict(title=f"No binding sites found at position {target_pos}. Valid range: {min_pos} - {max_pos}")), ""
-            
-        # Pick the first one (should be unique per strand/pos usually)
-        best_row = rows.iloc[0]
+        # Create choices for Dropdown
+        # Format: "Gap Size X (Score: Y)"
+        # Use index as value to likely ensure uniqueness or just use string
+        # Let's use a unique key in the dropdown if possible. Gradio dropdown values are strings.
+        # We will create a list of descriptions.
+        # And we need a way to map back. We can filter again in the update function or store a map in State.
+        # But State is hard to partial update.
+        # Simpler: Make formatted strings "Gap {size} (Score: {score})"
         
-        return generate_detail_figure(best_row), best_row['Segment']
+        choices = []
+        best_row = None
+        best_score = -999999
+        
+        # Sort by score descending to find best
+        rows_sorted = rows.sort_values(by='PPR_Binding_Score', ascending=False)
+        best_row = rows_sorted.iloc[0]
+        best_choice = ""
+        
+        for _, row in rows_sorted.iterrows():
+            gap = row['Gap_Size']
+            score = row['PPR_Binding_Score']
+            gap_idx = row.get('Gap_Index', 0)
+            
+            # Label with Gap Size AND Gap Position (Index)
+            # Gap Index means "after motif #X"
+            if gap > 0:
+                label = f"Gap Size {gap} at Motif #{gap_idx} (Score: {score:.2f})"
+            else:
+                label = f"No Gap (Score: {score:.2f})"
+                
+            choices.append(label)
+            if row.name == best_row.name:
+                best_choice = label
+        
+        fig = generate_detail_figure(best_row)
+        return fig, best_row['Segment'], gr.update(choices=choices, value=best_choice), gr.update(visible=True)
+        
     except Exception as e:
-        return go.Figure(layout=dict(title=f"Error: {e}")), ""
+        import traceback
+        traceback.print_exc()
+        return go.Figure(layout=dict(title=f"Error: {e}")), "", gr.update(choices=[], value=None), gr.update(choices=[], value=None)
+
+def update_detail_from_dropdown(selection_str, position, strand, df):
+    """Updates the plot based on the dropdown selection."""
+    if not selection_str or df is None:
+        return go.Figure(), ""
+        
+    try:
+        # Parse Gap Size and Score from string "Gap Size {gap} (Score: {score})"
+        # Regex or simple split
+        import re
+        # Find the specific row
+        # Parse gap size/index from string
+        # Regex: Gap Size (\d+) at Motif #(\d+) ... OR No Gap ...
+        
+        target_pos = int(position)
+        g_size = 0
+        g_idx = 0
+        
+        match_gap = re.search(r"Gap Size (\d+) at Motif #(\d+)", selection_str)
+        if match_gap:
+            g_size = int(match_gap.group(1))
+            g_idx = int(match_gap.group(2))
+        else:
+            # Check No Gap
+            if "No Gap" in selection_str:
+                g_size = 0
+                g_idx = 0
+        
+        # Filter
+        mask = (df['Genome_Position'] == target_pos) & \
+               (df['Strand'] == strand) & \
+               (df['Gap_Size'] == g_size)
+        
+        if g_size > 0:
+            mask = mask & (df['Gap_Index'] == g_idx)
+               
+        rows = df[mask]
+        if rows.empty:
+            return go.Figure(layout=dict(title="Could not find selected variation")), ""
+            
+        row = rows.iloc[0]
+        return generate_detail_figure(row), row['Segment']
+        
+    except Exception as e:
+        return go.Figure(layout=dict(title=f"Error updating: {e}")), ""
 
 # --- IGV Helper Removed ---
 # def generate_igv_html(fasta_path, bedgraph_path, locus_id): ...
 
-def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, scoring_method, allow_gaps, use_ps_score, job_name):
+def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name):
     # Construct analysis_type string
     method_map = {"PLS-type": "kobayashi", "P-type": "yan"}
     method = method_map.get(scoring_method, scoring_method).lower()
-    gap_str = "gap" if allow_gaps else "gap0"
+    gap_str = "gap" if max_gap_size > 0 else "gap0"
     ps_str = "ps" if use_ps_score else "no_ps"
     analysis_type = f"{method}_{gap_str}_{ps_str}"
+    
+    # Use relaxed constraints for gaps
+    min_front = 1
+    min_back = 1
+    
     """
     Orchestrates the analysis starting from an NCBI Accession ID.
     Yields updates for real-time logging in Gradio.
@@ -752,17 +956,18 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
     log("Starting unified analysis (this may take a few minutes)...")
     yield make_output("Running Analysis...")
     
+    # 3. Run Unified Analysis logic
+    log("Running Unified Analysis...")
+    yield make_output("Running Analysis...")
+    
     try:
-        # This is a blocking call, so no updates during this part unless we refactor run_unified_analysis too.
-        # But at least the user sees "Running Analysis..." and the logs up to here.
-        result = run_unified_analysis(protein_text, protein_file, rna_text, None, tool_choice, scoring_method, allow_gaps, use_ps_score, job_name)
-        
-        # Unpack result
-        msg, df, csv_path, fig_browser, fig_detail, df_state, motif_df, motif_fig = result
-        log(f"Analysis result: {msg}")
+        # We need to adapt the return values
+        result_msg, df, csv_path, fig_browser, fig_detail, df_state, motif_df, motif_fig = run_unified_analysis(
+            protein_text, protein_file, rna_text, None, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name
+        )
+        log(f"Analysis result: {result_msg}")
         
         # Optimize for UI: Truncate DataFrame if too large
-        # Full data is in CSV.
         ui_df = df.head(1000) if df is not None else None
         if df is not None and len(df) > 1000:
             log(f"Truncating DataFrame for UI display (showing 1000 of {len(df)} rows). Full data in CSV.")
@@ -842,12 +1047,6 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
                     # core.py: genome_pos = len(rna_seq) - 1 - row[0]
                     # This is the index in the forward sequence corresponding to the start of the motif match on the reverse complement?
                     # No, let's be careful.
-                    # If we have a match on reverse strand at relative pos `i` (0-based from 5' of reverse seq):
-                    # The corresponding index in forward seq (0-based from 5') is `len - 1 - i`.
-                    # This is the coordinate of the base paired with the 5' end of the reverse match.
-                    # So it's the high coordinate (3' end on forward strand).
-                    
-                    # BED chromStart/End are 0-based, half-open on Forward Strand.
                     # If we have a reverse feature of length L ending at `high_coord` (inclusive):
                     # chromEnd = high_coord + 1
                     # chromStart = chromEnd - L
@@ -920,7 +1119,7 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
         with gr.Column():
             gr.Markdown("### 3. Settings & Run")
             scoring_method = gr.Radio(["PLS-type", "P-type"], value="PLS-type", label="Scoring Method")
-            allow_gaps = gr.Checkbox(label="Allow Gaps", value=False)
+            max_gap_size = gr.Slider(minimum=0, maximum=5, value=0, step=1, label="Max Gap Size (0 = No Gaps)")
             use_ps_score = gr.Checkbox(label="Use Motif Confidence Score (+Score)", value=True)
             job_name_input = gr.Textbox(value="my_analysis", label="Job Name")
             run_btn = gr.Button("Run Unified Analysis", variant="primary")
@@ -944,7 +1143,11 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
             with gr.Row():
                 manual_pos = gr.Number(label="Genome Position", precision=0)
                 manual_strand = gr.Radio(["Forward", "Reverse"], value="Forward", label="Strand")
-            manual_btn = gr.Button("Show Detail")
+            
+            # Dropdown for Gap Selection (initially hidden/empty)
+            gap_select = gr.Dropdown(label="Select Alignment Variation", choices=[], visible=False)
+            
+            manual_btn = gr.Button("Search Site")
         with gr.Column(scale=3):
             plot_detail = gr.Plot(label="Selected Site Detail")
             detail_seq = gr.Textbox(label="Binding Sequence", interactive=True)
@@ -1038,15 +1241,16 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
         
     # Events
     run_btn.click(
-        run_unified_analysis,
-        inputs=[prot_text, prot_file, rna_text, rna_file, tool_select, scoring_method, allow_gaps, use_ps_score, job_name_input],
-        outputs=[status_output, df_output, csv_output, plot_browser, plot_detail, df_state, motif_table, motif_plot]
+        run_unified_analysis, 
+        inputs=[prot_text, prot_file, rna_text, rna_file, tool_select, scoring_method, max_gap_size, use_ps_score, job_name_input],
+        outputs=[status_output, df_output, csv_output, plot_browser, motif_plot, df_state, motif_table, motif_plot]
     )
     
+    # NCBI Event
     ncbi_btn.click(
         run_ncbi_analysis,
-        inputs=[ncbi_accession, prot_text, prot_file, tool_select, scoring_method, allow_gaps, use_ps_score, job_name_input],
-        outputs=[ncbi_log_output, ncbi_fasta_download, ncbi_bedgraph_download, ncbi_bed_download, ncbi_gff_download, ncbi_download, ncbi_log_output] 
+        inputs=[ncbi_accession, prot_text, prot_file, tool_select, scoring_method, max_gap_size, use_ps_score, job_name_input],
+        outputs=[ncbi_log_output, ncbi_fasta_download, ncbi_bedgraph_download, ncbi_bed_download, ncbi_gff_download, ncbi_download, ncbi_log_output]
     )
     
     print(f"DEBUG: plot_browser type: {type(plot_browser)}")
@@ -1059,10 +1263,17 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
     except Exception as e:
         print(f"WARNING: Failed to attach select event: {e}")
         
-    # Manual Event
+    # Manual Inspection Events
     manual_btn.click(
-        show_manual_detail,
+        show_manual_detail, # Now returns 4 outputs
         inputs=[manual_pos, manual_strand, df_state],
+        outputs=[plot_detail, detail_seq, gap_select, gap_select] # Update figure, seq, and choices
+    )
+    
+    # Gap Dropdown Change Event
+    gap_select.change(
+        update_detail_from_dropdown,
+        inputs=[gap_select, manual_pos, manual_strand, df_state],
         outputs=[plot_detail, detail_seq]
     )
 

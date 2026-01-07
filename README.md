@@ -1,6 +1,13 @@
-# PPR Motif Analyzer (Local Version)
+# PPR Motif Analyzer (Local Version) v1.2.0
 
 A standalone web application for identifying PPR motifs in protein sequences and analyzing their binding sites on RNA targets.
+
+## New in v1.2.0
+- **Gap Analysis**: Configurable "Max Gap Size" slider. Analysis optimized to process only the target gap size for speed.
+- **Improved Visualization**: 
+    - **Motif Plot**: Red-Blue gradient for confidence scores, cleaner labels (#Num), and FASTA name in title.
+    - **Site Inspector**: Manual selection of alignment variations (Gap positions) via dropdown.
+    - **Labels**: Clearer nomenclature (PLS-type/P-type) and explicit gap information.
 
 ## Features
 - **Unified Workflow**: Input Protein and RNA sequences to perform discovery and analysis in one step.
