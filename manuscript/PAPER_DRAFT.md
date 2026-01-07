@@ -27,7 +27,7 @@ The software implements two distinct scoring models tailored to different functi
     3.  Values were normalized to sum to 1 across the four bases:
         $$P_{base} = \frac{1/K_{d,base}}{\sum_{n \in \{A,C,G,U\}} (1/K_{d,n})}$$
 
-**Gap Awareness**: To account for structural flexibility in P-type PPR proteins, which may accommodate nucleotide "loop-outs" in the target RNA, the software implements a gap-tolerant scanning algorithm. It generates motif chain variations by inserting gaps (default `max_gap` size is user-configurable) at various positions and calculates binding scores for all potential alignments, retaining the optimal configuration.
+**Gap Awareness**: To account for structural flexibility in P-type PPR proteins, which may accommodate nucleotide "loop-outs" in the target RNA, the software implements a gap-tolerant scanning algorithm. Users can specify a `max_gap` size (0-5). For computational efficiency, the algorithm specifically analyzes site configurations with **no gap** and the **exact requested gap size**, skipping intermediate variations, to identify the optimal binding configuration.
 
 **Motif Confidence Weighting**: The final prediction score incorporates a "Motif Confidence Score" derived from the motif discovery step (e.g., HMMER bit scores/E-values or PS_Scan scores). The base binding probability ($P_{base}$) for each motif is weighted by its confidence score ($S_{conf}$), ensuring that motifs identified with higher certainty contribute more significantly to the target prediction:
 $$Score_{final} = \sum_{i=1}^{N} (P_{base, i} \times S_{conf, i})$$
