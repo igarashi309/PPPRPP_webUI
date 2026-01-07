@@ -49,7 +49,8 @@ DEFAULT_ACCESSION = "AP017386"
 
 def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_choice, scoring_method, allow_gaps, use_ps_score, job_name):
     # Construct analysis_type string
-    method = scoring_method.lower()
+    method_map = {"PLS-type": "kobayashi", "P-type": "yan"}
+    method = method_map.get(scoring_method, scoring_method).lower()
     gap_str = "gap" if allow_gaps else "gap0"
     ps_str = "ps" if use_ps_score else "no_ps"
     analysis_type = f"{method}_{gap_str}_{ps_str}"
@@ -689,7 +690,8 @@ def show_manual_detail(position, strand, df):
 
 def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, scoring_method, allow_gaps, use_ps_score, job_name):
     # Construct analysis_type string
-    method = scoring_method.lower()
+    method_map = {"PLS-type": "kobayashi", "P-type": "yan"}
+    method = method_map.get(scoring_method, scoring_method).lower()
     gap_str = "gap" if allow_gaps else "gap0"
     ps_str = "ps" if use_ps_score else "no_ps"
     analysis_type = f"{method}_{gap_str}_{ps_str}"
@@ -917,7 +919,7 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
     with gr.Row():
         with gr.Column():
             gr.Markdown("### 3. Settings & Run")
-            scoring_method = gr.Radio(["Kobayashi", "Yan"], value="Kobayashi", label="Scoring Method")
+            scoring_method = gr.Radio(["PLS-type", "P-type"], value="PLS-type", label="Scoring Method")
             allow_gaps = gr.Checkbox(label="Allow Gaps", value=False)
             use_ps_score = gr.Checkbox(label="Use Motif Confidence Score (+Score)", value=True)
             job_name_input = gr.Textbox(value="my_analysis", label="Job Name")
@@ -1063,6 +1065,23 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
         inputs=[manual_pos, manual_strand, df_state],
         outputs=[plot_detail, detail_seq]
     )
+
+    
+    gr.Markdown("""
+    ### About this Software
+    
+    This software identifies PPR motifs using PPRFinder and PS_Scan (ScanProsite). Target prediction was implemented based on the frameworks described by Kobayashi et al. (PLS-type) and Yan et al. (P-type). Please cite the references below when using this software.
+
+    ### References
+    
+    **PLS-type**: Kobayashi, T., Yagi, Y., & Nakamura, T. (2019). Comprehensive Prediction of Target RNA Editing Sites for PLS-Class PPR Proteins in Arabidopsis thaliana. *Plant and Cell Physiology*, 60(4), 862–874. [https://doi.org/10.1093/pcp/pcy251](https://doi.org/10.1093/pcp/pcy251)
+    
+    **P-type**: Yan, J., Yao, Y., Hong, S., Yang, Y., Shen, C., Zhang, Q., Zhang, D., Zou, T., & Yin, P. (2019). Delineation of pentatricopeptide repeat codes for target RNA prediction. *Nucleic Acids Research*, 47(7), 3728–3738. [https://doi.org/10.1093/nar/gkz075](https://doi.org/10.1093/nar/gkz075)
+    
+    **PPRFinder**: Gutmann, B., Royan, S., Schallenberg-Rüdinger, M., Lenz, H., Castleden, I. R., McDowell, R., Vacher, M. A., Tonti-Filippini, J., Bond, C. S., Knoop, V., & Small, I. D. (2020). The Expansion and Diversification of Pentatricopeptide Repeat RNA-Editing Factors in Plants. *Molecular Plant*, 13(2), 215–230. [https://doi.org/10.1016/j.molp.2019.11.002](https://doi.org/10.1016/j.molp.2019.11.002)
+    
+    **PS_Scan**: de Castro, E., Sigrist, C. J. A., Gattiker, A., Bulliard, V., Langendijk-Genevaux, P. S., Gasteiger, E., Bairoch, A., & Hulo, N. (2006). ScanProsite: detection of PROSITE signature matches and ProRule-associated functional and structural residues in proteins. *Nucleic Acids Research*, 34(suppl_2), W362–W365. [https://doi.org/10.1093/nar/gkl124](https://doi.org/10.1093/nar/gkl124)
+    """)
 
 if __name__ == "__main__":
     cleanup_temp_files()
