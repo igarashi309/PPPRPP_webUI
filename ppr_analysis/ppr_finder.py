@@ -20,8 +20,8 @@ def parse_domtblout(domtblout_path):
             # target_name        accession   tlen query_name           accession   qlen   E-value  score  bias   #  of  c-Evalue  i-Evalue  score  bias  from    to  from    to  from    to  acc  description of target
             # 0                  1           2    3                    4           5      6        7      8      9  10  11        12        13     14    15      16  17      18  19      20  21   22...
             
-            target_name = parts[0] # Motif name (e.g., P, L1)
-            # query_name = parts[3]
+            target_name = parts[3] # Motif name (Query name in hmmsearch is the profile)
+            # target_name = parts[0] # Target name in hmmsearch is the sequence (Protein ID)
             
             # We use domain scores/evalues (cols 11-14 usually, but let's check standard)
             # Col 6: full sequence E-value
