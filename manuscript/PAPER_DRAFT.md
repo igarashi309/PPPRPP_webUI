@@ -54,7 +54,7 @@ The tool visualizes results using **Plotly**, providing:
 53: -   **IGV Export:** The tool generates standard format files (**BedGraph** for scores, **BED** for binding sites, and **GFF3** for annotations) that can be exported for visualization in external genome browsers like the Integrative Genomics Viewer (IGV).
 
 **Validation**
-To verify the accuracy of the tool, we performed a target prediction for the well-characterized P-type PPR protein **Rf1a** (PPR791) against the *Oryza sativa* mitochondrial genome partial sequence containing the *atp6-orf79* locus. Rf1a is known to bind to the *atp6-orf79* cotranscript to promote cleavage (Wang et al. 2006). Using the default P-type scoring model with `max_gap=0`, PPPRPP successfully identified the known binding site upstream of *atp6* as a prominent peak (Figure 1). This result confirms that the software correctly implements the P-class PPR code and scoring logic.
+To verify the accuracy of the tool, we performed a target prediction for the well-characterized P-type PPR protein **Rf1a** (PPR791) against the *Oryza sativa* mitochondrial genome partial sequence containing the *atp6-orf79* locus. Rf1a is known to promote the cleavage of the *atp6-orf79* cotranscript, silencing the sterility gene *orf79*. Previous studies have identified the precise binding site of Rf1a upstream of *atp6* (Kazama et al. 2008). Using the default P-type scoring model with `max_gap=0`, PPPRPP successfully identified a prominent peak that exactly matches the reported Rf1a binding site (Figure 1). This result confirms that the software correctly implements the P-class PPR code and accurately predicts experimentally verified targets.
 
 **Accession numbers**
 Sequence data from this article can be found in the GenBank/EMBL data libraries under accession numbers [Accession Numbers].
@@ -87,6 +87,8 @@ Grant CE, Bailey TL, Noble WS (2011) FIMO: scanning for occurrences of a given m
 Gutmann B, Royan S, Schallenberg-Rüdinger M, Lenz H, Castleden IR, McDowell R, Vacher MA, Tonti-Filippini J, Bond CS, Knoop V, Small ID (2020) The Expansion and Diversification of Pentatricopeptide Repeat RNA-Editing Factors in Plants. *Mol Plant* 13: 215–230
 
 Kobayashi T, Yagi Y, Nakamura T (2019) Comprehensive Prediction of Target RNA Editing Sites for PLS-Class PPR Proteins in Arabidopsis thaliana. *Plant Cell Physiol* 60: 862–874
+
+Kazama T, Nakamura T, Watanabe M, Sugita M, Toriyama K (2008) Suppression mechanism of mitochondrial ORF79 accumulation by Rf1 protein in BT-type cytoplasmic male sterile rice. *Plant J* 55: 619-628
 
 Pfalz J, Bayraktar OA, Prikryl J, Barkan A (2009) Site-specific binding of a PPR protein defines and stabilizes 5' and 3' mRNA termini in chloroplasts. *EMBO J* 28: 2042-2052
 
