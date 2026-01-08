@@ -673,8 +673,15 @@ def visualize_motifs(motifs_file, analysis_title=None):
                 opacity=0, 
                 showscale=True,
                 colorbar=dict(
-                    title=dict(text="Confidence Score", side="right"),
-                    len=0.75
+                    title=dict(text="Confidence Score", side="top"),
+                    tickfont=dict(size=10),
+                    orientation='h',
+                    yanchor='bottom',
+                    y=1.02, # Slightly above plot
+                    xanchor='right',
+                    x=1.0,
+                    len=0.3,
+                    thickness=15
                 )
             ),
             hoverinfo='skip'
