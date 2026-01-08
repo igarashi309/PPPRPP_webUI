@@ -57,9 +57,9 @@ The tool visualizes results using **Plotly**, providing:
 To verify the accuracy of the tool, we performed a target prediction for the well-characterized P-type PPR protein **Rf1a** (PPR791) against the *Oryza sativa* mitochondrial genome partial sequence containing the *atp6-orf79* locus. Rf1a is known to promote the cleavage of the *atp6-orf79* cotranscript, silencing the sterility gene *orf79*. Previous studies have identified the precise binding site of Rf1a within the intergenic region between *atp6* and *orf79* (upstream of *orf79*) (Kazama et al. 2008).
 
 Using the default P-type scoring model with `max_gap=0`, PPPRPP successfully accurately reproduced the known binding events (Figure 1).
-**Figure 1A** shows the **Motif Architecture** of Rf1a predicted by PPRFinder, displaying the characteristic P-L-S triplet structure.
+**Figure 1A** shows the **Motif Architecture** of Rf1a predicted by PPRFinder, displaying the characteristic P-motif repeat structure typical of P-class proteins.
 **Figure 1B** presents the **Genome Browser** view, where a distinct, high-scoring peak is clearly visible in the intergenic region between *atp6* and *orf79*, effectively distinguishing the true binding site from background noise.
-**Figure 1C** provides the **Detail Inspector** view of this peak, revealing the specific nucleotide-amino acid alignment. The high probability scores at key positions (5th and 35th amino acids) confirm that the P-type scoring algorithm correctly prioritizes the experimentally verified binding sequence.
+**Figure 1C** provides the **Detail Inspector** view of this peak, revealing the specific nucleotide-amino acid alignment. Visualizing the amino acids at comparable positions (5 and 35) allows users to verify that the predicted binding site comprises combinations known to have high affinity for the target RNA sequence.
 
 This comprehensive result—from motif detection to specific target site identification—confirms that the software correctly implements the P-class PPR code and accurately predicts experimentally verified targets.
 
