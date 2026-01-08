@@ -1261,7 +1261,7 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
     
     with gr.Row():
         with gr.Column(scale=1):
-            gr.Markdown("### Inspect Specific Site")
+            gr.Markdown("### Detail Inspector")
             with gr.Row():
                 manual_pos = gr.Number(label="Genome Position", precision=0)
                 manual_strand = gr.Radio(["Forward", "Reverse"], value="Forward", label="Strand")
