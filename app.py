@@ -534,12 +534,11 @@ def visualize_motifs(motifs_file):
                 font=dict(color="white", size=10)
             )
             
-            # Text (Number) - Above (Removed Type)
-            # " #1 "
+            # Text (Number and Type) - Above
             fig.add_annotation(
                 x=(row['Start'] + row['End']) / 2,
                 y=0.35,
-                text=f"<b>#{motif_num}</b>",
+                text=f"<b>#{motif_num}<br>({row['Type']})</b>",
                 showarrow=False,
                 font=dict(color="black", size=9)
             )
