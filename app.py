@@ -452,9 +452,7 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
     fig.update_xaxes(title_text="Genomic Position", row=2, col=1, range=[start, end])
     fig.update_yaxes(title_text="Score", row=1, col=1, range=[-y_limit, y_limit])
     fig.update_yaxes(title_text="Features", row=2, col=1, range=[-2, 2], showticklabels=False, showgrid=False)
-        height=plot_height,
-        hovermode="closest"
-    )
+
     return fig
 
 def visualize_motifs(motifs_file):
