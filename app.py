@@ -1180,7 +1180,8 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             plot_detail = gr.Plot(label="Selected Site Detail")
             detail_seq = gr.Textbox(label="Binding Sequence", interactive=True)
         
-    with gr.Accordion("Data Table & Download", open=False):
+    gr.Markdown("### Data Table & Download")
+    with gr.Group():
         df_output = gr.DataFrame(label="Results Summary")
         csv_output = gr.File(label="Download CSV")
         
@@ -1207,7 +1208,8 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
         with gr.Row():
             ncbi_download = gr.File(label="Download CSV")
             
-        with gr.Accordion("Range Inspector", open=False):
+        gr.Markdown("### Range Inspector")
+        with gr.Group():
             gr.Markdown("Inspect a specific genomic range with gene annotations.")
             with gr.Row():
                 range_start = gr.Number(label="Start Position", value=132162, precision=0)
@@ -1241,7 +1243,8 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
                 outputs=[range_plot]
             )
             
-        with gr.Accordion("Inspect Specific Site", open=False):
+        gr.Markdown("### Inspect Specific Site")
+        with gr.Group():
             gr.Markdown("View detailed binding scores for a specific position.")
             with gr.Row():
                 with gr.Column(scale=1):
