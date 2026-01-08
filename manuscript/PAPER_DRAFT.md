@@ -63,6 +63,9 @@ Using the default P-type scoring model with `max_gap=0`, PPPRPP successfully acc
 
 This comprehensive result—from motif detection to specific target site identification—confirms that the software correctly implements the P-class PPR code and accurately predicts experimentally verified targets.
 
+**Discussion**
+The development of PPPRPP addresses a critical need in plant organellar biology: the lack of accessible prediction tools for P-type PPR proteins. By moving beyond the "editing-centric" view and implementing the P-class specific scoring code tailored with $K_d$-based scoring, this tool provides a more physiologically relevant prediction model for proteins involved in RNA stabilization and cleavage. A key innovation of PPPRPP is its explicit handling of "gapped" binding, a phenomenon well-documented in biological studies (e.g., PPR10, CRP1) but largely ignored by rigid alignment tools. While the omission of statistical significance values (p-values) requires users to rely on relative score peaks, this approach is more practical for exploring large, repetitive organellar genomes where traditional motif statistics often break down. We anticipate that PPPRPP will accelerate the functional characterization of the vast number of orphan P-type PPR proteins, shedding light on their diverse roles in post-transcriptional regulation.
+
 **Accession numbers**
 Sequence data from this article can be found in the GenBank/EMBL data libraries under accession numbers [Accession Numbers].
 
