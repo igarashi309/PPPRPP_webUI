@@ -466,10 +466,10 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
     )
     
     # Update axes
-    fig.update_xaxes(title_text="Genomic Position", row=3, col=1, range=[start, end]) # X-axis at bottom
-    fig.update_yaxes(title_text="Fwd Score", row=1, col=1, range=[0, y_limit])
-    fig.update_yaxes(title_text="Features", row=2, col=1, range=[-2, 2], showticklabels=False, showgrid=False)
-    fig.update_yaxes(title_text="Rev Score", row=3, col=1, range=[0, y_limit], autorange="reversed") # Reverse Y-axis visually? Or just positive going down? User asked for "+" values separate. Typically bottom plot has inverted Y if mirrored, but if separated, standard Y is fine. Let's stick to standard Y [0, y_limit] but maybe name it "Rev Score". Or maybe user wants top-down? "Standard positive graph" implies normal Y. Let's use normal Y [0, y_limit].
+    fig.update_xaxes(title_text="Genomic Position", row=3, col=1, range=[start, end]) 
+    fig.update_yaxes(title_text="Fwd Score", row=1, col=1, range=[0, y_limit], fixedrange=False)
+    fig.update_yaxes(title_text="Features", row=2, col=1, range=[-2, 2], showticklabels=False, showgrid=False, fixedrange=True)
+    fig.update_yaxes(title_text="Rev Score", row=3, col=1, range=[y_limit, 0], fixedrange=False) # Reverse Y-axis visually? Or just positive going down? User asked for "+" values separate. Typically bottom plot has inverted Y if mirrored, but if separated, standard Y is fine. Let's stick to standard Y [0, y_limit] but maybe name it "Rev Score". Or maybe user wants top-down? "Standard positive graph" implies normal Y. Let's use normal Y [0, y_limit].
     # Wait, if I use normal Y for Reverse, it won't look "mirrored" (0 in middle). It will be two independent graphs. 
     # Row 1: 0 at bottom. Row 3: 0 at bottom.
     # Features in middle.
