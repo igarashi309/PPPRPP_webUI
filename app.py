@@ -1118,8 +1118,8 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
     with gr.Row():
         with gr.Column():
             gr.Markdown("### 3. Settings & Run")
-            scoring_method = gr.Radio(["PLS-type", "P-type"], value="PLS-type", label="Scoring Method")
-            max_gap_size = gr.Slider(minimum=0, maximum=20, value=0, step=1, label="Max Gap Size (0 = No Gaps)")
+            scoring_method = gr.Radio(["P-type", "PLS-type"], value="P-type", label="Scoring Method")
+            max_gap_size = gr.Number(value=0, label="Gap Size (0 = No Gaps)")
             use_ps_score = gr.Checkbox(label="Use Motif Confidence Score (+Score)", value=True)
             job_name_input = gr.Textbox(value="my_analysis", label="Job Name")
             run_btn = gr.Button("Run Unified Analysis", variant="primary")
