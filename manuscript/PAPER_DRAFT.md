@@ -33,22 +33,25 @@ The software seamlessly integrates motif identification and target scoring. Moti
 For these reasons, in the "search for motif-like sequences targeting the entire plant mitochondrial genome" which is the purpose of this study, it is difficult to apply the existing statistical framework as it is, and it is necessary to explicitly deal with the gap between computational resource constraints and statistical consistency. Consequently, we intentionally did not calculate p-values or q-values, because the statistical assumptions underlying these measures break down when scanning extremely long, repetitive organellar genomes under realistic computational constraints. Instead, we focused on visualizing and comparing the raw motif scores along the genome as an exploratory tool to identify candidate regions for further investigation.
 
 **Scoring Algorithms**
-PPPRPP extracts the specific amino acid residues (typically the 5th and 35th/last positions) that define RNA binding specificity and applies one of two user-selectable scoring models:
-1.  **P-type Model (Primary):** Based on ITC-derived dissociation constants ($K_d$) for P-class proteins (Yan et al. 2019). The binding scores were derived from the dissociation constant ($K_d$) values obtained from Isothermal Titration Calorimetry (ITC) analysis. In the P-type model, missing $K_d$ values are penalized, and the reciprocal of the $K_d$ ($A = 1/K_d$) is normalized to calculate the base probability ($P_{base}$):
-$$P_{base} = \frac{1/K_{d,base}}{\sum_{n \in \{A,C,G,U\}} (1/K_{d,n})}$$
-The final prediction score incorporates a "Motif Confidence Score" derived from the motif discovery step (e.g., HMMER bit scores/E-values or PS_Scan scores). The base binding probability ($P_{base}$) for each motif is weighted by its confidence score ($S_{conf}$), ensuring that motifs identified with higher certainty contribute more significantly to the target prediction:
+PPPRPP extracts the specific amino acid residues (typically the 5th and 35th/last positions) that define RNA binding specificity and applies one of two user-selectable scoring models35: 1.  **P-type Model (Primary):** Based on ITC-derived dissociation constants ($K_d$) for P-class proteins (Yan et al. 2019). The binding scores were derived from the dissociation constant ($K_d$) values obtained from Isothermal Titration Calorimetry (ITC) analysis. In the P-type model, combinations with missing $K_d$ values are penalized by assigning a neutral base probability of **0.25**. The reciprocal of the $K_d$ ($A = 1/K_d$) is normalized to calculate the base probability ($P_{base}$):
+36: $$P_{base} = \frac{1/K_{d,base}}{\sum_{n \in \{A,C,G,U\}} (1/K_{d,n})}$$
+37: The final prediction score can optionally incorporate a "Motif Confidence Score" derived from the motif discovery step (e.g., HMMER bit scores/E-values or PS_Scan scores). If enabled by the user, the base binding probability ($P_{base}$) for each motif is weighted by its confidence score ($S_{conf}$), ensuring that motifs identified with higher certainty contribute more significantly to the target prediction:
 $$Score_{final} = \sum_{i=1}^{N} (P_{base, i} \times S_{conf, i})$$
 
 2.  **PLS-type Model (Secondary):** Based on probability scores for 2-letter amino acid combinations defined for RNA editing factors (Kobayashi et al. 2019). Binding scores were calculated using the probability scores for 2-letter amino acid combinations (positions 5 and 35/last) defined in the Supplementary Data of Kobayashi et al. (2019). This allows users to compare results or analyze PLS-type proteins within the same interface.
 
-**Gap-Tolerant Scanning**
-To address the structural flexibility of P-type proteins, the software implements a gap-tolerant scanning algorithm. Users can specify a `max_gap` size (0-5). The algorithm explicitly evaluates alignments with **no gap** and the **exact requested gap size**, skipping intermediate variations to optimize performance while capturing the characteristic "loop-out" binding mode.
+42: **Gap-Tolerant Scanning**
+43: To address the structural flexibility of P-type proteins, the software implements a gap-tolerant scanning algorithm. Users can specify a `max_gap` size (user-definable, up to 20 nucleotides). The algorithm explicitly evaluates alignments with **no gap** and the **exact requested gap size**, skipping intermediate variations to optimize performance while capturing the characteristic "loop-out" binding mode (e.g., 2-3 nt for PPR10, 9 nt for CRP1).
 
 **Visualization and Interface**
 The tool visualizes results using **Plotly**, providing:
 -   **Genome Browser:** An interactive track showing binding scores across the entire RNA molecule.
 -   **Motif Architecture:** A detailed schematic of the protein's motif structure, colored by prediction confidence, with labels for motif types (P, L, S) and their specific indices (e.g., #1, #2).
--   **Detail Inspector:** A zoomable view of specific binding sites, allowing users to inspect the contribution of individual motifs and manually toggle between different gap alignment hypotheses.
+49: -   **Detail Inspector:** A zoomable view of specific binding sites, allowing users to inspect the contribution of individual motifs and manually toggle between different gap alignment hypotheses.
+50: 
+51: **Auxiliary Features**
+52: -   **NCBI Integration:** Users can perform analysis directly on reference genomes by retrieving sequences via NCBI Accession IDs.
+53: -   **IGV Export:** The tool generates standard format files (**BedGraph** for scores, **BED** for binding sites, and **GFF3** for annotations) that can be exported for visualization in external genome browsers like the Integrative Genomics Viewer (IGV).
 
 **Validation**
 To verify the accuracy of the tool, we performed a target prediction for the well-characterized P-type PPR protein **Rf1a** (PPR791) against the *Oryza sativa* mitochondrial genome partial sequence containing the *atp6-orf79* locus. Rf1a is known to bind to the *atp6-orf79* cotranscript to promote cleavage (Wang et al. 2006). Using the default P-type scoring model with `max_gap=0`, PPPRPP successfully identified the known binding site upstream of *atp6* as a prominent peak (Figure 1). This result confirms that the software correctly implements the P-class PPR code and scoring logic.
