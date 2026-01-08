@@ -250,7 +250,12 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     
 def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis"):
     """Helper to plot the genome browser."""
-    fig = go.Figure()
+    fig = make_subplots(
+        rows=2, cols=1, 
+        shared_xaxes=True, 
+        vertical_spacing=0.05, 
+        subplot_titles=("Forward Strand Binding", "Reverse Strand Binding")
+    )
     
     unique_ppr_names = df['PPR_Name'].unique()
     colors = px.colors.qualitative.Plotly
@@ -271,7 +276,7 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis"):
                 marker=dict(color=color, size=6, symbol='circle'),
                 customdata=custom_data, 
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: +<extra></extra>"
-            ))
+            ), row=1, col=1)
             
         # Reverse
         df_rev = df[(df['PPR_Name'] == name) & (df['Strand'] == "Reverse")]
@@ -280,27 +285,37 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis"):
             custom_data = np.stack((df_rev.index, df_rev['PPR_Binding_Score']), axis=-1)
             fig.add_trace(go.Scatter(
                 x=df_rev['Genome_Position'],
-                y=-df_rev['PPR_Binding_Score'],
+                y=df_rev['PPR_Binding_Score'], # Positive values
                 mode='markers',
                 name=f"{name} (-)",
                 marker=dict(color=color, size=6, symbol='x'),
                 customdata=custom_data,
-                hovertemplate="Pos: %{x}<br>Score: %{customdata[1]:.2f}<br>Strand: -<extra></extra>"
-            ))
+                hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<extra></extra>"
+            ), row=2, col=1)
 
-    # Calculate symmetric Y-axis range
+    # Calculate Y-axis range
     max_score = df['PPR_Binding_Score'].abs().max() if not df.empty else 10
-    # Add a small buffer (10%)
     y_limit = max_score * 1.1
     
     fig.update_layout(
         title=f"Genome Browser - {seq_id}",
-        xaxis_title="Genomic Position",
-        yaxis_title="Binding Score (Up: Forward / Down: Reverse)",
-        yaxis=dict(range=[-y_limit, y_limit]), # Symmetric Y-axis
         height=600,
         hovermode="closest"
     )
+    
+    # Update axes
+    fig.update_xaxes(title_text="Genomic Position", row=2, col=1)
+    fig.update_yaxes(title_text="Fwd Score", row=1, col=1, range=[0, y_limit])
+    fig.update_yaxes(title_text="Rev Score", row=2, col=1, range=[0, y_limit], autorange="reversed") # Invert Y for reverse strand to keep "mirror" feel but with + values? Or standard? User said "values displayed as + on both sides". 
+    # Usually "Genome browsers" separate strands by midline zero.
+    # But here we separate into TRACKS.
+    # If tracks are separated, standard Y (0 at bottom) is most readable for graphs.
+    # But if I invert the bottom one, it mimics the "mirror" style 0-to-top vs 0-to-bottom.
+    # Let's try INVERTED Y for the bottom track (reversed range) so it looks like:
+    # Fwd: 0 -> Max (Up)
+    # Rev: 0 -> Max (Down)
+    # This maintains the "Directionality" intuition while keeping numbers positive.
+    
     return fig
 
 def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_types=None, plot_height=600):
@@ -309,14 +324,14 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
         feature_types = ["gene", "CDS", "tRNA", "rRNA", "exon"]
         
     fig = make_subplots(
-        rows=2, cols=1, 
+        rows=3, cols=1, 
         shared_xaxes=True, 
-        vertical_spacing=0.05,
-        row_heights=[0.8, 0.2],
-        subplot_titles=("Binding Scores", "Gene Annotations")
+        vertical_spacing=0.02,
+        row_heights=[0.4, 0.2, 0.4],
+        subplot_titles=("Forward Strand Binding", "Gene Annotations", "Reverse Strand Binding")
     )
     
-    # 1. Plot Binding Scores (Row 1)
+    # 1. Plot Binding Scores (Row 1: Forward, Row 3: Reverse)
     # Filter DF for range
     df_range = df[(df['Genome_Position'] >= start) & (df['Genome_Position'] <= end)]
     
@@ -343,12 +358,12 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
         if not df_rev.empty:
             fig.add_trace(go.Scatter(
                 x=df_rev['Genome_Position'],
-                y=-df_rev['PPR_Binding_Score'],
+                y=df_rev['PPR_Binding_Score'], # Use positive values now
                 mode='markers',
                 name=f"{name} (-)",
                 marker=dict(color=color, size=8, symbol='x'),
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<extra></extra>"
-            ), row=1, col=1)
+            ), row=3, col=1) # Row 3
 
     # Calculate symmetric Y-axis range (Global max to match main browser)
     max_score = df['PPR_Binding_Score'].abs().max() if not df.empty else 10
@@ -449,10 +464,15 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
     )
     
     # Update axes
-    fig.update_xaxes(title_text="Genomic Position", row=2, col=1, range=[start, end])
-    fig.update_yaxes(title_text="Score", row=1, col=1, range=[-y_limit, y_limit])
+    fig.update_xaxes(title_text="Genomic Position", row=3, col=1, range=[start, end]) # X-axis at bottom
+    fig.update_yaxes(title_text="Fwd Score", row=1, col=1, range=[0, y_limit])
     fig.update_yaxes(title_text="Features", row=2, col=1, range=[-2, 2], showticklabels=False, showgrid=False)
-
+    fig.update_yaxes(title_text="Rev Score", row=3, col=1, range=[0, y_limit], autorange="reversed") # Reverse Y-axis visually? Or just positive going down? User asked for "+" values separate. Typically bottom plot has inverted Y if mirrored, but if separated, standard Y is fine. Let's stick to standard Y [0, y_limit] but maybe name it "Rev Score". Or maybe user wants top-down? "Standard positive graph" implies normal Y. Let's use normal Y [0, y_limit].
+    # Wait, if I use normal Y for Reverse, it won't look "mirrored" (0 in middle). It will be two independent graphs. 
+    # Row 1: 0 at bottom. Row 3: 0 at bottom.
+    # Features in middle.
+    # This is fine. User asked to "divide them" so they can show "+ values".
+    
     return fig
 
 def visualize_motifs(motifs_file):
