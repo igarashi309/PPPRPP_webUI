@@ -299,7 +299,7 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis"):
 
     fig.update_layout(
         title=f"Genome Browser - {seq_id}",
-        height=600,
+        height=500,
         hovermode="closest",
         margin=dict(t=50, b=50, l=50, r=50) # Added margins
     )
@@ -319,7 +319,7 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis"):
     
     return fig
 
-def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_types=None, plot_height=600):
+def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_types=None, plot_height=500):
     """Plots binding scores and gene annotations for a specific range."""
     if feature_types is None:
         feature_types = ["gene", "CDS", "tRNA", "rRNA", "exon"]
@@ -1181,7 +1181,7 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             detail_seq = gr.Textbox(label="Binding Sequence", interactive=True)
         
     gr.Markdown("### Data Table & Download")
-    with gr.Group():
+    with gr.Row():
         df_output = gr.DataFrame(label="Results Summary")
         csv_output = gr.File(label="Download CSV")
         
@@ -1209,22 +1209,21 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             ncbi_download = gr.File(label="Download CSV")
             
         gr.Markdown("### Range Inspector")
-        with gr.Group():
-            gr.Markdown("Inspect a specific genomic range with gene annotations.")
-            with gr.Row():
-                range_start = gr.Number(label="Start Position", value=132162, precision=0)
-                range_end = gr.Number(label="End Position", value=135622, precision=0)
-                range_btn = gr.Button("Inspect Range")
+        gr.Markdown("Inspect a specific genomic range with gene annotations.")
+        with gr.Row():
+            range_start = gr.Number(label="Start Position", value=132162, precision=0)
+            range_end = gr.Number(label="End Position", value=135622, precision=0)
+            range_btn = gr.Button("Inspect Range")
+        
+        with gr.Row():
+            feature_types = gr.CheckboxGroup(
+                ["gene", "CDS", "tRNA", "rRNA", "exon"], 
+                value=["gene", "tRNA", "rRNA"], 
+                label="Show Features"
+            )
+            plot_height = gr.Slider(minimum=400, maximum=1200, value=500, step=50, label="Plot Height (px)")
             
-            with gr.Row():
-                feature_types = gr.CheckboxGroup(
-                    ["gene", "CDS", "tRNA", "rRNA", "exon"], 
-                    value=["gene", "tRNA", "rRNA"], 
-                    label="Show Features"
-                )
-                plot_height = gr.Slider(minimum=400, maximum=1200, value=600, step=50, label="Plot Height (px)")
-                
-            range_plot = gr.Plot(label="Range Browser")
+        range_plot = gr.Plot(label="Range Browser")
             
             def on_range_click(accession, start, end, csv_file, gff_file, features, height):
                 if not csv_file:
@@ -1244,16 +1243,15 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             )
             
         gr.Markdown("### Inspect Specific Site")
-        with gr.Group():
-            gr.Markdown("View detailed binding scores for a specific position.")
-            with gr.Row():
-                with gr.Column(scale=1):
-                    ncbi_manual_pos = gr.Number(label="Genome Position", precision=0)
-                    ncbi_manual_strand = gr.Radio(["Forward", "Reverse"], value="Forward", label="Strand")
-                    ncbi_manual_btn = gr.Button("Show Detail")
-                with gr.Column(scale=3):
-                    ncbi_detail_plot = gr.Plot(label="Site Detail")
-                    ncbi_detail_seq = gr.Textbox(label="Binding Sequence", interactive=True)
+        gr.Markdown("View detailed binding scores for a specific position.")
+        with gr.Row():
+            with gr.Column(scale=1):
+                ncbi_manual_pos = gr.Number(label="Genome Position", precision=0)
+                ncbi_manual_strand = gr.Radio(["Forward", "Reverse"], value="Forward", label="Strand")
+                ncbi_manual_btn = gr.Button("Show Detail")
+            with gr.Column(scale=3):
+                ncbi_detail_plot = gr.Plot(label="Site Detail")
+                ncbi_detail_seq = gr.Textbox(label="Binding Sequence", interactive=True)
             
             def on_ncbi_detail_click(csv_file, pos, strand):
                 if not csv_file:
