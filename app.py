@@ -2,6 +2,7 @@ import gradio as gr
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
 import os
 import tempfile
@@ -47,11 +48,41 @@ DEFAULT_ACCESSION = "AP017386"
 
 # --- Logic Functions ---
 
+def list_past_results():
+    """Lists available result CSV files in TMP_DIR, sorted by newest."""
+    files = glob.glob(os.path.join(TMP_DIR, "*_results.csv"))
+    # Sort by mtime
+    files.sort(key=os.path.getmtime, reverse=True)
+    return [os.path.basename(f) for f in files]
+
+def load_result(filename):
+    """Loads a past result CSV and updates the UI."""
+    # Output signature: status_msg, csv_path, fig, fig_detail, df_state, motif_df, motif_fig
+    if not filename:
+        return "No file selected.", None, go.Figure(), go.Figure(), None, pd.DataFrame(), go.Figure()
+    
+    path = os.path.join(TMP_DIR, filename)
+    if not os.path.exists(path):
+        return f"File not found: {filename}", None, go.Figure(), go.Figure(), None, pd.DataFrame(), go.Figure()
+        
+    try:
+        df = pd.read_csv(path)
+        # Re-plot
+        job_name = filename.replace("_results.csv", "")
+        # Analysis type from DF if available
+        atype = df['Analysis_Type'].iloc[0] if 'Analysis_Type' in df.columns and not df.empty else "Loaded"
+        
+        fig = plot_genome_browser(df, seq_id=job_name, analysis_type=atype)
+        
+        return f"Loaded result: {filename}", path, fig, go.Figure(), df, pd.DataFrame(), go.Figure()
+    except Exception as e:
+        return f"Error loading: {e}", None, go.Figure(), go.Figure(), None, pd.DataFrame(), go.Figure()
+
 def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name):
     # Construct analysis_type string
     method_map = {"PLS-type": "kobayashi", "P-type": "yan"}
     method = method_map.get(scoring_method, scoring_method).lower()
-    gap_str = "gap" if max_gap_size > 0 else "gap0"
+    gap_str = f"gap{int(max_gap_size)}" if max_gap_size > 0 else "gap0"
     ps_str = "ps" if use_ps_score else "no_ps"
     analysis_type = f"{method}_{gap_str}_{ps_str}"
     # 1. Process Protein Input (Discovery)
@@ -231,82 +262,185 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     # Filter for significant hits (optional, but good for default view)
     # For now, return all or top hits. Let's return all.
     
-    # Save to CSV
-    csv_path = os.path.join(TMP_DIR, f"{job_name}_results.csv")
+    # Sanitize helper
+    def sanitize(s):
+        import re
+        return re.sub(r'[^\w\-_\.]', '_', str(s))
+
+    # Extract IDs from FASTA content
+    prot_id = "Protein"
+    if protein_input and protein_input.strip().startswith(">"):
+        header = protein_input.strip().split("\n")[0]
+        # Use first word of header as ID, or up to 15 chars if no spaces? 
+        # User said "FASTA name info". Usually that's the ID (first token).
+        prot_id = header[1:].strip().split()[0] 
+
+    rna_id = "RNA"
+    if rna_input and rna_input.strip().startswith(">"):
+        header = rna_input.strip().split("\n")[0]
+        rna_id = header[1:].strip().split()[0]
+        
+    # Construct descriptive job name
+    # Format: {UserJobName}_{ProtID}_{RNAID}_{AnalysisParams}
+    # Avoid redundancy if UserJobName is default
+    clean_job_name = sanitize(job_name)
+    clean_prot = sanitize(prot_id)
+    clean_rna = sanitize(rna_id)
+    # analysis_type is already formatted e.g. "yan_gap2_ps"
+    
+    # If job name is generic, maybe replace it? But user said "arbitrary input string AND ...".
+    # So we MUST include the input string.
+    final_job_name = f"{clean_job_name}_{clean_prot}_{clean_rna}_{analysis_type}"
+    
+    # Construct friendly filename parts
+    friendly_method = "P-type" if method == "yan" else "PLS-type"
+    friendly_gap = f"Gap{int(max_gap_size)}"
+    friendly_score = "ScoreOn" if use_ps_score else "ScoreOff"
+    
+    # Format: {UserJobName}_{ProtID}_{RNAID}_{Method}_{Gap}_{Score}_results.csv
+    final_job_name = f"{clean_job_name}_{clean_prot}_{clean_rna}_{friendly_method}_{friendly_gap}_{friendly_score}_results"
+    
+    # Save to CSV using the new descriptive name
+    # Ensure it ends with _results.csv logic for past_results glob
+    # Actually, we appended _results to final_job_name, so just add .csv
+    csv_path = os.path.join(TMP_DIR, f"{final_job_name}.csv")
     df_output.to_csv(csv_path, index=False)
 
     # 5. Visualization (Genome Browser)
     fig = plot_genome_browser(df_output, seq_id, analysis_type)
+
     
     # 6. Visualize Motifs
     motif_df, motif_fig = pd.DataFrame(), go.Figure()
     if motifs_file and os.path.exists(motifs_file):
-        motif_df, motif_fig = visualize_motifs(motifs_file)
+        # Create a friendly title for the plot
+        friendly_title = f"Method: {friendly_method} | Gap: {int(max_gap_size)} | Score: {'On' if use_ps_score else 'Off'}"
+        motif_df, motif_fig = visualize_motifs(motifs_file, analysis_title=friendly_title)
     else:
         status_msg += "\nWarning: Motif details file not found for visualization."
 
-    return "Analysis Complete", df_output, csv_path, fig, go.Figure(), df_output, motif_df, motif_fig
+    return "Analysis Complete", csv_path, fig, go.Figure(), df_output, motif_df, motif_fig, gr.update(choices=list_past_results(), value=f"{final_job_name}.csv")
     
+def parse_analysis_type(atype_str):
+    """Parses analysis_type string into readable format."""
+    # format: {method}_{gap_str}_{ps_str} e.g. yan_gap0_ps or kobayashi_gap2_no_ps
+    # method: yan->P-type, kobayashi->PLS-type
+    if not atype_str or atype_str == "Analysis":
+        return "Analysis Results"
+        
+    parts = atype_str.split('_')
+    method = "Unknown"
+    gap = "0"
+    ps = "Off"
+    
+    if len(parts) >= 3:
+        m = parts[0]
+        g = parts[1]
+        p = parts[2]
+        
+        if m == "yan": method = "P-type"
+        elif m == "kobayashi": method = "PLS-type"
+        else: method = m.capitalize()
+        
+        if g.startswith("gap"): gap = g.replace("gap", "")
+        
+        if "no" in p: ps = "Off"
+        else: ps = "On"
+        
+        return f"Method: {method} | Gap: {gap} | Score: {ps}"
+    return atype_str
+
 def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis"):
     """Helper to plot the genome browser."""
-    fig = go.Figure()
+    # Try to get analysis type from DF if not provided or generic
+    if (analysis_type == "Analysis" or analysis_type is None) and 'Analysis_Type' in df.columns and not df.empty:
+        analysis_type = df['Analysis_Type'].iloc[0]
+        
+    readable_condition = parse_analysis_type(analysis_type)
+    
+    fig = make_subplots(
+        rows=2, cols=1, 
+        shared_xaxes=True, 
+        vertical_spacing=0.08, 
+        subplot_titles=("Forward Strand Binding", "Reverse Strand Binding")
+    )
     
     unique_ppr_names = df['PPR_Name'].unique()
     colors = px.colors.qualitative.Plotly
     
+    # Calculate global max score first to ensure consistent Y-axis
+    max_score = df['PPR_Binding_Score'].abs().max() if not df.empty else 10
+    y_limit = max_score * 1.1
+
     for i, name in enumerate(unique_ppr_names):
         color = colors[i % len(colors)]
         
         # Forward
         df_fwd = df[(df['PPR_Name'] == name) & (df['Strand'] == "Forward")]
         if not df_fwd.empty:
+            custom_data = np.stack((df_fwd.index, df_fwd['PPR_Binding_Score']), axis=-1)
             fig.add_trace(go.Scatter(
                 x=df_fwd['Genome_Position'],
                 y=df_fwd['PPR_Binding_Score'],
                 mode='markers',
                 name=f"{name} (+)",
                 marker=dict(color=color, size=6, symbol='circle'),
-                customdata=df_fwd.index, # Store index for click event
+                customdata=custom_data, 
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: +<extra></extra>"
-            ))
+            ), row=1, col=1)
             
         # Reverse
         df_rev = df[(df['PPR_Name'] == name) & (df['Strand'] == "Reverse")]
         if not df_rev.empty:
+            custom_data = np.stack((df_rev.index, df_rev['PPR_Binding_Score']), axis=-1)
             fig.add_trace(go.Scatter(
                 x=df_rev['Genome_Position'],
-                y=-df_rev['PPR_Binding_Score'],
+                y=df_rev['PPR_Binding_Score'], 
                 mode='markers',
                 name=f"{name} (-)",
                 marker=dict(color=color, size=6, symbol='x'),
-                customdata=df_rev.index,
+                customdata=custom_data,
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<extra></extra>"
-            ))
+            ), row=2, col=1)
 
-    # Calculate symmetric Y-axis range
-    max_score = df['PPR_Binding_Score'].abs().max() if not df.empty else 10
-    # Add a small buffer (10%)
-    y_limit = max_score * 1.1
-    
     fig.update_layout(
-        title=f"Genome Browser - {seq_id}",
-        xaxis_title="Genomic Position",
-        yaxis_title="Binding Score (+ / -)",
-        yaxis=dict(range=[-y_limit, y_limit]), # Symmetric Y-axis
-        height=600,
-        hovermode="closest"
+        title=f"Genome Browser - {seq_id}<br><sup>{readable_condition}</sup>",
+        height=500,
+        hovermode="closest",
+        margin=dict(t=80, b=50, l=50, r=50) # Increased top margin for subtitle
     )
+    
+    fig.update_xaxes(title_text="Genomic Position", row=2, col=1)
+    fig.update_yaxes(title_text="Fwd Score", row=1, col=1, range=[0, y_limit])
+    fig.update_yaxes(title_text="Rev Score", row=2, col=1, range=[0, y_limit], autorange="reversed")
+    
     return fig
 
-def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_types=None, plot_height=600):
+def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_types=None, plot_height=500):
     """Plots binding scores and gene annotations for a specific range."""
+    # Extract analysis type from DF
+    analysis_type = "Analysis"
+    if 'Analysis_Type' in df.columns and not df.empty:
+        analysis_type = df['Analysis_Type'].iloc[0]
+    
+    readable_condition = parse_analysis_type(analysis_type)
+    
     if feature_types is None:
         feature_types = ["gene", "CDS", "tRNA", "rRNA", "exon"]
         
-    fig = go.Figure()
+    fig = make_subplots(
+        rows=3, cols=1, 
+        shared_xaxes=True, 
+        vertical_spacing=0.08, 
+        row_heights=[0.4, 0.2, 0.4],
+        subplot_titles=("Forward Strand Binding", "Gene Annotations", "Reverse Strand Binding")
+    )
     
-    # 1. Plot Binding Scores
-    # Filter DF for range
+    # Calculate global max score first for consistent Y-axis
+    max_score = df['PPR_Binding_Score'].abs().max() if not df.empty else 10
+    y_limit = max_score * 1.1
+
+    # 1. Plot Binding Scores (Row 1: Forward, Row 3: Reverse)
     df_range = df[(df['Genome_Position'] >= start) & (df['Genome_Position'] <= end)]
     
     unique_ppr_names = df['PPR_Name'].unique()
@@ -325,34 +459,28 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
                 name=f"{name} (+)",
                 marker=dict(color=color, size=8, symbol='circle'),
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: +<extra></extra>"
-            ))
+            ), row=1, col=1)
             
         # Reverse
         df_rev = df_range[(df_range['PPR_Name'] == name) & (df_range['Strand'] == "Reverse")]
         if not df_rev.empty:
             fig.add_trace(go.Scatter(
                 x=df_rev['Genome_Position'],
-                y=-df_rev['PPR_Binding_Score'],
+                y=df_rev['PPR_Binding_Score'], 
                 mode='markers',
                 name=f"{name} (-)",
                 marker=dict(color=color, size=8, symbol='x'),
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<extra></extra>"
-            ))
+            ), row=3, col=1)
 
-    # Calculate symmetric Y-axis range (Global max to match main browser)
-    max_score = df['PPR_Binding_Score'].abs().max() if not df.empty else 10
-    y_limit = max_score * 1.1
+    # 2. Plot Gene Annotations from GFF3 (Row 2)
+    fig.add_trace(go.Scatter(x=[start, end], y=[0, 0], mode='markers', marker=dict(opacity=0), showlegend=False, hoverinfo='skip'), row=2, col=1)
     
-    # 2. Plot Gene Annotations from GFF3
     if gff_path and os.path.exists(gff_path):
         features = ncbi.parse_gff(gff_path, start, end)
         
-        # Determine Y-position for genes (Central placement)
-        # Place genes near Y=0. Forward slightly above, Reverse slightly below.
-        # Use a small offset based on y_limit.
-        offset = y_limit * 0.05
-        gene_y_fwd = offset
-        gene_y_rev = -offset
+        gene_y_fwd = 0.5
+        gene_y_rev = -0.5
         
         for feat in features:
             f_type = feat['type']
@@ -362,7 +490,6 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
             f_start = max(start, feat['start'])
             f_end = min(end, feat['end'])
             f_strand = feat['strand']
-            f_name = feat['attributes'].get('Name', feat['attributes'].get('ID', f_type))
             
             # Color by type
             if f_type == 'CDS': color = 'orange'
@@ -373,82 +500,61 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
             
             if f_strand == '+':
                 y_pos = gene_y_fwd
-                symbol = 'triangle-right'
-                # Draw arrow head at end? No, just use shape.
             else:
                 y_pos = gene_y_rev
-                symbol = 'triangle-left'
                 
-            # Draw gene as an arrow (SVG path)
-            # Make it thicker for visibility
-            thickness = y_limit * 0.02
-            half_thick = thickness
-            
-            # Arrow head size
-            # Fixed size relative to view width (1%)
+            # Arrow drawing logic reused (omitted details for brevity in this prompt context but kept in code)
+            thickness = 0.4
+            half_thick = thickness / 2
             view_width = end - start
             head_len = view_width * 0.01
-            
-            # Ensure head doesn't exceed gene length (for very short genes)
             head_len = min(head_len, f_end - f_start)
             
             if f_strand == '+':
-                # Right arrow >
-                # Points: (start, top), (end-head, top), (end, mid), (end-head, bottom), (start, bottom)
                 y_top = y_pos + half_thick
                 y_bot = y_pos - half_thick
                 y_mid = y_pos
-                
-                x_start = f_start
-                x_end = f_end
                 x_head_base = max(f_start, f_end - head_len)
-                
-                path = f"M {x_start},{y_top} L {x_head_base},{y_top} L {x_end},{y_mid} L {x_head_base},{y_bot} L {x_start},{y_bot} Z"
-                
+                path = f"M {f_start},{y_top} L {x_head_base},{y_top} L {f_end},{y_mid} L {x_head_base},{y_bot} L {f_start},{y_bot} Z"
             else:
-                # Left arrow <
-                # Points: (start+head, top), (end, top), (end, bottom), (start+head, bottom), (start, mid)
                 y_top = y_pos + half_thick
                 y_bot = y_pos - half_thick
                 y_mid = y_pos
-                
-                x_start = f_start
-                x_end = f_end
                 x_head_base = min(f_end, f_start + head_len)
-                
-                path = f"M {x_head_base},{y_top} L {x_end},{y_top} L {x_end},{y_bot} L {x_head_base},{y_bot} L {x_start},{y_mid} Z"
+                path = f"M {x_head_base},{y_top} L {f_end},{y_top} L {f_end},{y_bot} L {x_head_base},{y_bot} L {f_start},{y_mid} Z"
 
             fig.add_shape(
-                type="path",
-                path=path,
-                line=dict(color=color, width=1),
-                fillcolor=color,
-                opacity=0.6
+                type="path", path=path, line=dict(color=color, width=1), fillcolor=color, opacity=0.6, row=2, col=1
             )
             
-            # Add label (above for fwd, below for rev)
-            label_y = y_pos + (thickness * 2.5) if f_strand == '+' else y_pos - (thickness * 2.5)
-            
+            # Add label
             fig.add_annotation(
                 x=(f_start + f_end) / 2,
-                y=label_y,
+                y=y_pos,
                 text=f_name,
                 showarrow=False,
                 font=dict(color="black", size=10),
+                yshift=15 if f_strand == '+' else -15,
+                row=2, col=1
             )
-
+            
+    # Add title with conditions
     fig.update_layout(
-        title=f"Range Inspector ({start} - {end})",
-        xaxis_title="Genomic Position",
-        yaxis_title="Binding Score (+ / -)",
-        xaxis=dict(range=[start, end]),
-        yaxis=dict(range=[-y_limit, y_limit]), # Symmetric Y-axis
+        title=f"Range Browser - {seq_id}<br><sup>{readable_condition}</sup>",
         height=plot_height,
-        hovermode="closest"
+        hovermode="closest",
+        margin=dict(t=80, b=50, l=50, r=50)
     )
+            
+    fig.update_xaxes(title_text="Genomic Position", row=3, col=1)
+    fig.update_yaxes(title_text="Fwd Score", row=1, col=1, range=[0, y_limit])
+    fig.update_yaxes(title_text="Annotations", row=2, col=1, showticklabels=False, range=[-1, 1])
+    fig.update_yaxes(title_text="Rev Score", row=3, col=1, range=[0, y_limit], autorange="reversed")
+    
     return fig
 
-def visualize_motifs(motifs_file):
+
+def visualize_motifs(motifs_file, analysis_title=None):
     """Parses motifs file and returns DataFrame and Plotly figure."""
     try:
         # Read _motifs.txt (created by ppr_finder.py)
@@ -534,12 +640,11 @@ def visualize_motifs(motifs_file):
                 font=dict(color="white", size=10)
             )
             
-            # Text (Number) - Above (Removed Type)
-            # " #1 "
+            # Text (Number and Type) - Above
             fig.add_annotation(
                 x=(row['Start'] + row['End']) / 2,
                 y=0.35,
-                text=f"<b>#{motif_num}</b>",
+                text=f"<b>#{motif_num}<br>({row['Type']})</b>",
                 showarrow=False,
                 font=dict(color="black", size=9)
             )
@@ -572,16 +677,21 @@ def visualize_motifs(motifs_file):
                     len=0.75
                 )
             ),
-            hoverinfo='skip',
-            showlegend=False
+            hoverinfo='skip'
         ))
-
+        
+        # Layout settings
+        title_text = f"Discovered Motifs (PPRFinder) - {fasta_name}"
+        if analysis_title:
+            title_text += f"<br><sub>{analysis_title}</sub>"
+            
         fig.update_layout(
-            title=f"Motif Architecture: {fasta_name}",
-            xaxis_title="Amino Acid Position",
+            title=title_text,
+            xaxis=dict(title="Amino Acid Position", zeroline=False),
             yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-0.6, 0.6]),
             height=300,
-            margin=dict(l=20, r=20, t=60, b=40)
+            plot_bgcolor='white',
+            margin=dict(t=80) # Increase top margin for subtitle
         )
         
         # Removed 'Header' from return to hide it, also user wanted "unneeded".
@@ -891,7 +1001,7 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
     # Construct analysis_type string
     method_map = {"PLS-type": "kobayashi", "P-type": "yan"}
     method = method_map.get(scoring_method, scoring_method).lower()
-    gap_str = "gap" if max_gap_size > 0 else "gap0"
+    gap_str = f"gap{int(max_gap_size)}" if max_gap_size > 0 else "gap0"
     ps_str = "ps" if use_ps_score else "no_ps"
     analysis_type = f"{method}_{gap_str}_{ps_str}"
     
@@ -962,7 +1072,7 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
     
     try:
         # We need to adapt the return values
-        result_msg, df, csv_path, fig_browser, fig_detail, df_state, motif_df, motif_fig = run_unified_analysis(
+        result_msg, csv_path, fig_browser, fig_detail, df, motif_df, motif_fig, _ = run_unified_analysis(
             protein_text, protein_file, rna_text, None, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name
         )
         log(f"Analysis result: {result_msg}")
@@ -1099,8 +1209,8 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
 
 # --- UI Definition ---
 
-with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
-    gr.Markdown("# PPR Motif Analyzer (Unified Workflow)")
+with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
+    gr.Markdown("# P-type PPR Prediction Program (PPPRPP)")
     gr.Markdown("Input your Protein sequence (to discover motifs) and RNA sequence (target) to analyze binding sites.")
     
     with gr.Row():
@@ -1118,10 +1228,15 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
     with gr.Row():
         with gr.Column():
             gr.Markdown("### 3. Settings & Run")
-            scoring_method = gr.Radio(["PLS-type", "P-type"], value="PLS-type", label="Scoring Method")
-            max_gap_size = gr.Slider(minimum=0, maximum=5, value=0, step=1, label="Max Gap Size (0 = No Gaps)")
+            scoring_method = gr.Radio(["P-type", "PLS-type"], value="P-type", label="Scoring Method")
+            max_gap_size = gr.Number(value=0, label="Gap Size (0 = No Gaps)")
             use_ps_score = gr.Checkbox(label="Use Motif Confidence Score (+Score)", value=True)
             job_name_input = gr.Textbox(value="my_analysis", label="Job Name")
+            
+            # Result Management
+            past_results = list_past_results()
+            result_selector = gr.Dropdown(label="Past Results", choices=past_results, value=None, interactive=True)
+            
             run_btn = gr.Button("Run Unified Analysis", variant="primary")
             
         with gr.Column():
@@ -1152,8 +1267,8 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
             plot_detail = gr.Plot(label="Selected Site Detail")
             detail_seq = gr.Textbox(label="Binding Sequence", interactive=True)
         
-    with gr.Accordion("Data Table & Download", open=False):
-        df_output = gr.DataFrame(label="Results Summary")
+    gr.Markdown("### Download Results")
+    with gr.Row():
         csv_output = gr.File(label="Download CSV")
         
     # State
@@ -1179,71 +1294,78 @@ with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
         with gr.Row():
             ncbi_download = gr.File(label="Download CSV")
             
-        with gr.Accordion("Range Inspector", open=False):
-            gr.Markdown("Inspect a specific genomic range with gene annotations.")
-            with gr.Row():
-                range_start = gr.Number(label="Start Position", value=132162, precision=0)
-                range_end = gr.Number(label="End Position", value=135622, precision=0)
-                range_btn = gr.Button("Inspect Range")
-            
-            with gr.Row():
-                feature_types = gr.CheckboxGroup(
-                    ["gene", "CDS", "tRNA", "rRNA", "exon"], 
-                    value=["gene", "CDS", "tRNA", "rRNA"], 
-                    label="Show Features"
-                )
-                plot_height = gr.Slider(minimum=400, maximum=1200, value=600, step=50, label="Plot Height (px)")
-                
-            range_plot = gr.Plot(label="Range Browser")
-            
-            def on_range_click(accession, start, end, csv_file, gff_file, features, height):
-                if not csv_file:
-                    return go.Figure(layout=dict(title="No CSV file found. Run analysis first."))
-                try:
-                    df = pd.read_csv(csv_file.name)
-                    # GFF file object or path?
-                    gff_path = gff_file.name if gff_file else None
-                    return plot_range_browser(df, gff_path, int(start), int(end), accession, features, int(height))
-                except Exception as e:
-                    return go.Figure(layout=dict(title=f"Error: {e}"))
-
-            range_btn.click(
-                on_range_click,
-                inputs=[ncbi_accession, range_start, range_end, ncbi_download, ncbi_gff_download, feature_types, plot_height],
-                outputs=[range_plot]
+        gr.Markdown("### Range Inspector")
+        gr.Markdown("Inspect a specific genomic range with gene annotations.")
+        with gr.Row():
+            range_start = gr.Number(label="Start Position", value=132162, precision=0)
+            range_end = gr.Number(label="End Position", value=135622, precision=0)
+            range_btn = gr.Button("Inspect Range")
+        
+        with gr.Row():
+            feature_types = gr.CheckboxGroup(
+                ["gene", "CDS", "tRNA", "rRNA", "exon"], 
+                value=["gene", "tRNA", "rRNA"], 
+                label="Show Features"
             )
+            plot_height = gr.Slider(minimum=400, maximum=1200, value=500, step=50, label="Plot Height (px)")
             
-        with gr.Accordion("Inspect Specific Site", open=False):
-            gr.Markdown("View detailed binding scores for a specific position.")
-            with gr.Row():
-                with gr.Column(scale=1):
-                    ncbi_manual_pos = gr.Number(label="Genome Position", precision=0)
-                    ncbi_manual_strand = gr.Radio(["Forward", "Reverse"], value="Forward", label="Strand")
-                    ncbi_manual_btn = gr.Button("Show Detail")
-                with gr.Column(scale=3):
-                    ncbi_detail_plot = gr.Plot(label="Site Detail")
-                    ncbi_detail_seq = gr.Textbox(label="Binding Sequence", interactive=True)
+        range_plot = gr.Plot(label="Range Browser")
             
-            def on_ncbi_detail_click(csv_file, pos, strand):
-                if not csv_file:
-                    return go.Figure(layout=dict(title="No CSV file found. Run analysis first.")), ""
-                try:
-                    df = pd.read_csv(csv_file.name)
-                    return show_manual_detail(pos, strand, df)
-                except Exception as e:
-                    return go.Figure(layout=dict(title=f"Error: {e}")), ""
+        def on_range_click(accession, start, end, csv_file, gff_file, features, height):
+            if not csv_file:
+                return go.Figure(layout=dict(title="No CSV file found. Run analysis first."))
+            try:
+                df = pd.read_csv(csv_file.name)
+                # GFF file object or path?
+                gff_path = gff_file.name if gff_file else None
+                return plot_range_browser(df, gff_path, int(start), int(end), accession, features, int(height))
+            except Exception as e:
+                return go.Figure(layout=dict(title=f"Error: {e}"))
 
-            ncbi_manual_btn.click(
-                on_ncbi_detail_click,
-                inputs=[ncbi_download, ncbi_manual_pos, ncbi_manual_strand],
-                outputs=[ncbi_detail_plot, ncbi_detail_seq]
-            )
+        range_btn.click(
+            on_range_click,
+            inputs=[ncbi_accession, range_start, range_end, ncbi_download, ncbi_gff_download, feature_types, plot_height],
+            outputs=[range_plot]
+        )
+            
+        gr.Markdown("### Inspect Specific Site")
+        gr.Markdown("View detailed binding scores for a specific position.")
+        with gr.Row():
+            with gr.Column(scale=1):
+                ncbi_manual_pos = gr.Number(label="Genome Position", precision=0)
+                ncbi_manual_strand = gr.Radio(["Forward", "Reverse"], value="Forward", label="Strand")
+                ncbi_manual_btn = gr.Button("Show Detail")
+            with gr.Column(scale=3):
+                ncbi_detail_plot = gr.Plot(label="Site Detail")
+                ncbi_detail_seq = gr.Textbox(label="Binding Sequence", interactive=True)
+            
+        def on_ncbi_detail_click(csv_file, pos, strand):
+            if not csv_file:
+                return go.Figure(layout=dict(title="No CSV file found. Run analysis first.")), ""
+            try:
+                df = pd.read_csv(csv_file.name)
+                return show_manual_detail(pos, strand, df)
+            except Exception as e:
+                return go.Figure(layout=dict(title=f"Error: {e}")), ""
+
+        ncbi_manual_btn.click(
+            on_ncbi_detail_click,
+            inputs=[ncbi_download, ncbi_manual_pos, ncbi_manual_strand],
+            outputs=[ncbi_detail_plot, ncbi_detail_seq]
+        )
         
     # Events
     run_btn.click(
         run_unified_analysis, 
         inputs=[prot_text, prot_file, rna_text, rna_file, tool_select, scoring_method, max_gap_size, use_ps_score, job_name_input],
-        outputs=[status_output, df_output, csv_output, plot_browser, motif_plot, df_state, motif_table, motif_plot]
+        outputs=[status_output, csv_output, plot_browser, motif_plot, df_state, motif_table, motif_plot, result_selector]
+    )
+    
+    # Result Selector Event
+    result_selector.select(
+        load_result,
+        inputs=[result_selector],
+        outputs=[status_output, csv_output, plot_browser, plot_detail, df_state, motif_table, motif_plot]
     )
     
     # NCBI Event
