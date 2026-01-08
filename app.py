@@ -253,13 +253,17 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis"):
     fig = make_subplots(
         rows=2, cols=1, 
         shared_xaxes=True, 
-        vertical_spacing=0.05, 
+        vertical_spacing=0.08, # Increased from 0.05
         subplot_titles=("Forward Strand Binding", "Reverse Strand Binding")
     )
     
     unique_ppr_names = df['PPR_Name'].unique()
     colors = px.colors.qualitative.Plotly
     
+    # Calculate global max score first to ensure consistent Y-axis
+    max_score = df['PPR_Binding_Score'].abs().max() if not df.empty else 10
+    y_limit = max_score * 1.1
+
     for i, name in enumerate(unique_ppr_names):
         color = colors[i % len(colors)]
         
@@ -293,14 +297,11 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis"):
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<extra></extra>"
             ), row=2, col=1)
 
-    # Calculate Y-axis range
-    max_score = df['PPR_Binding_Score'].abs().max() if not df.empty else 10
-    y_limit = max_score * 1.1
-    
     fig.update_layout(
         title=f"Genome Browser - {seq_id}",
         height=600,
-        hovermode="closest"
+        hovermode="closest",
+        margin=dict(t=50, b=50, l=50, r=50) # Added margins
     )
     
     # Update axes
@@ -326,11 +327,15 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
     fig = make_subplots(
         rows=3, cols=1, 
         shared_xaxes=True, 
-        vertical_spacing=0.02,
+        vertical_spacing=0.08, # Increased from 0.02
         row_heights=[0.4, 0.2, 0.4],
         subplot_titles=("Forward Strand Binding", "Gene Annotations", "Reverse Strand Binding")
     )
     
+    # Calculate global max score first for consistent Y-axis
+    max_score = df['PPR_Binding_Score'].abs().max() if not df.empty else 10
+    y_limit = max_score * 1.1
+
     # 1. Plot Binding Scores (Row 1: Forward, Row 3: Reverse)
     # Filter DF for range
     df_range = df[(df['Genome_Position'] >= start) & (df['Genome_Position'] <= end)]
@@ -365,10 +370,6 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<extra></extra>"
             ), row=3, col=1) # Row 3
 
-    # Calculate symmetric Y-axis range (Global max to match main browser)
-    max_score = df['PPR_Binding_Score'].abs().max() if not df.empty else 10
-    y_limit = max_score * 1.1
-    
     # 2. Plot Gene Annotations from GFF3 (Row 2)
     # Add an invisible trace to initialize the axis range for Row 2
     fig.add_trace(go.Scatter(x=[start, end], y=[0, 0], mode='markers', marker=dict(opacity=0), showlegend=False, hoverinfo='skip'), row=2, col=1)
@@ -460,7 +461,8 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
         title=f"Range Inspector ({start} - {end})",
         height=plot_height,
         hovermode="closest",
-        showlegend=True
+        showlegend=True,
+        margin=dict(t=50, b=50, l=50, r=50) # Added margins
     )
     
     # Update axes
