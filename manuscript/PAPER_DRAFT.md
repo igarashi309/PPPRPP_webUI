@@ -9,12 +9,12 @@ Address: [Address]
 Phone: [Phone]
 Email: [Email]
 
-**Running Title:** Unified PPR Motif Analyzer
+**Running Title:** P-type PPR Prediction Program (PPPRPP)
 
 **Abbreviations:** PPR, pentatricopeptide repeat; GUI, graphical user interface; PLS, P-L-S triplet; ITC, Isothermal Titration Calorimetry.
 
 ## Abstract
-Pentatricopeptide repeat (PPR) proteins are key regulators of RNA metabolism in plant organelles, involved in essential processes such as RNA editing and splicing. Identifying PPR motifs and predicting their RNA targets remains a complex task requiring multiple computational tools. Here, we present **PPR Motif Analyzer (Unified)**, a standalone software tool that integrates motif discovery and target prediction into a single user-friendly web interface. By combining PPRFinder for accurate motif detection with scoring algorithms based on the PPR code (P-class) and amino acid residues (PLS-class), this tool streamlines the functional analysis of plant PPR proteins. The software provides interactive visualization of motif architecture and RNA binding sites, facilitating rapid hypothesis generation for researchers.
+Pentatricopeptide repeat (PPR) proteins are key regulators of RNA metabolism in plant organelles, involved in essential processes such as RNA editing and splicing. Identifying PPR motifs and predicting their RNA targets remains a complex task requiring multiple computational tools. Here, we present **P-type PPR Prediction Program (PPPRPP)**, a standalone software tool that integrates motif discovery and target prediction into a single user-friendly web interface. By combining PPRFinder for accurate motif detection with scoring algorithms based on the PPR code (P-class) and amino acid residues (PLS-class), this tool streamlines the functional analysis of plant PPR proteins. The software provides interactive visualization of motif architecture and RNA binding sites, facilitating rapid hypothesis generation for researchers.
 
 **Key words:** Bioinformatics, Motif discovery, Pentatricopeptide repeat, RNA editing, Web tool.
 
@@ -33,7 +33,7 @@ $$P_{base} = \frac{1/K_{d,base}}{\sum_{n \in \{A,C,G,U\}} (1/K_{d,n})}$$
 
 To account for valid structural flexibility in P-type PPR proteins, which may accommodate nucleotide "loop-outs" in the target RNA, the software implements a gap-tolerant scanning algorithm. Users can specify a `max_gap` size (0-5) to investigate alternative alignments. For computational efficiency, the algorithm specifically analyzes site configurations with **no gap** and the **exact requested gap size**, skipping intermediate variations, to identify the optimal binding configuration. Furthermore, to enhance prediction reliability, the final score incorporates a "Motif Confidence Score" ($S_{conf}$) derived from the initial motif search (e.g., HMMER E-values). The final score is a confidence-weighted sum of basis probabilities: $Score_{final} = \sum_{i=1}^{N} (P_{base, i} \times S_{conf, i})$.
 
-The integrated workflow allows users to input a protein FASTA sequence and a target RNA FASTA sequence. The tool automatically executes the pipeline—defining the motif architecture, calculating binding scores across the RNA sequence, and displaying the results as an interactive genome browser track using **Plotly**. Users can manually inspect individual binding sites via a dropdown menu to compare different gap alignment variations (e.g., PLS-type vs P-type alignments), ensuring robustness in site validation. We believe "PPR Motif Analyzer (Unified)" democratizes access to state-of-the-art PPR analysis methods, allowing researchers to generate hypotheses about RNA targets without needing extensive bioinformatics expertise.
+The integrated workflow allows users to input a protein FASTA sequence and a target RNA FASTA sequence. The tool automatically executes the pipeline—defining the motif architecture, calculating binding scores across the RNA sequence, and displaying the results as an interactive genome browser track using **Plotly**. Users can manually inspect individual binding sites via a dropdown menu to compare different gap alignment variations (e.g., PLS-type vs P-type alignments), ensuring robustness in site validation. We believe "P-type PPR Prediction Program (PPPRPP)" democratizes access to state-of-the-art PPR analysis methods, allowing researchers to generate hypotheses about RNA targets without needing extensive bioinformatics expertise.
 
 **Accession numbers**
 Sequence data from this article can be found in the GenBank/EMBL data libraries under accession numbers [Accession Numbers].
