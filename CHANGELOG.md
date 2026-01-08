@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.0.8] - 2026-01-09
+
+### Changed
+- **Result Filenames**: filenames now include detailed analysis parameters (e.g., `JobName_ProtID_RNAID_P-type_Gap0_ScoreOn_results.csv`) for better organization and identification in "Past Results".
+- **Motif Architecture Plot**: 
+    - Title now displays analysis settings (Method, Gap, Score).
+    - Confidence Score legend moved to top-right and horizontal for better visibility.
+
 ## [v0.0.6] - 2025-12-05
 
 ### Fixed
