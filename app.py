@@ -2,6 +2,7 @@ import gradio as gr
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+from plotly.subplots import make_subplots
 import matplotlib.pyplot as plt
 import os
 import tempfile
@@ -260,27 +261,31 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis"):
         # Forward
         df_fwd = df[(df['PPR_Name'] == name) & (df['Strand'] == "Forward")]
         if not df_fwd.empty:
+            # customdata: index, score
+            custom_data = np.stack((df_fwd.index, df_fwd['PPR_Binding_Score']), axis=-1)
             fig.add_trace(go.Scatter(
                 x=df_fwd['Genome_Position'],
                 y=df_fwd['PPR_Binding_Score'],
                 mode='markers',
                 name=f"{name} (+)",
                 marker=dict(color=color, size=6, symbol='circle'),
-                customdata=df_fwd.index, # Store index for click event
+                customdata=custom_data, 
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: +<extra></extra>"
             ))
             
         # Reverse
         df_rev = df[(df['PPR_Name'] == name) & (df['Strand'] == "Reverse")]
         if not df_rev.empty:
+            # customdata: index, score (positive)
+            custom_data = np.stack((df_rev.index, df_rev['PPR_Binding_Score']), axis=-1)
             fig.add_trace(go.Scatter(
                 x=df_rev['Genome_Position'],
                 y=-df_rev['PPR_Binding_Score'],
                 mode='markers',
                 name=f"{name} (-)",
                 marker=dict(color=color, size=6, symbol='x'),
-                customdata=df_rev.index,
-                hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<extra></extra>"
+                customdata=custom_data,
+                hovertemplate="Pos: %{x}<br>Score: %{customdata[1]:.2f}<br>Strand: -<extra></extra>"
             ))
 
     # Calculate symmetric Y-axis range
@@ -291,7 +296,7 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis"):
     fig.update_layout(
         title=f"Genome Browser - {seq_id}",
         xaxis_title="Genomic Position",
-        yaxis_title="Binding Score (+ / -)",
+        yaxis_title="Binding Score (Up: Forward / Down: Reverse)",
         yaxis=dict(range=[-y_limit, y_limit]), # Symmetric Y-axis
         height=600,
         hovermode="closest"
@@ -303,9 +308,15 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
     if feature_types is None:
         feature_types = ["gene", "CDS", "tRNA", "rRNA", "exon"]
         
-    fig = go.Figure()
+    fig = make_subplots(
+        rows=2, cols=1, 
+        shared_xaxes=True, 
+        vertical_spacing=0.05,
+        row_heights=[0.8, 0.2],
+        subplot_titles=("Binding Scores", "Gene Annotations")
+    )
     
-    # 1. Plot Binding Scores
+    # 1. Plot Binding Scores (Row 1)
     # Filter DF for range
     df_range = df[(df['Genome_Position'] >= start) & (df['Genome_Position'] <= end)]
     
@@ -325,7 +336,7 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
                 name=f"{name} (+)",
                 marker=dict(color=color, size=8, symbol='circle'),
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: +<extra></extra>"
-            ))
+            ), row=1, col=1)
             
         # Reverse
         df_rev = df_range[(df_range['PPR_Name'] == name) & (df_range['Strand'] == "Reverse")]
@@ -337,22 +348,23 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
                 name=f"{name} (-)",
                 marker=dict(color=color, size=8, symbol='x'),
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<extra></extra>"
-            ))
+            ), row=1, col=1)
 
     # Calculate symmetric Y-axis range (Global max to match main browser)
     max_score = df['PPR_Binding_Score'].abs().max() if not df.empty else 10
     y_limit = max_score * 1.1
     
-    # 2. Plot Gene Annotations from GFF3
+    # 2. Plot Gene Annotations from GFF3 (Row 2)
+    # Add an invisible trace to initialize the axis range for Row 2
+    fig.add_trace(go.Scatter(x=[start, end], y=[0, 0], mode='markers', marker=dict(opacity=0), showlegend=False, hoverinfo='skip'), row=2, col=1)
+    
     if gff_path and os.path.exists(gff_path):
         features = ncbi.parse_gff(gff_path, start, end)
         
-        # Determine Y-position for genes (Central placement)
-        # Place genes near Y=0. Forward slightly above, Reverse slightly below.
-        # Use a small offset based on y_limit.
-        offset = y_limit * 0.05
-        gene_y_fwd = offset
-        gene_y_rev = -offset
+        # Determine Y-position for genes (Staggered or simple)
+        # Use simple +/- 1
+        gene_y_fwd = 0.5
+        gene_y_rev = -0.5
         
         for feat in features:
             f_type = feat['type']
@@ -373,28 +385,20 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
             
             if f_strand == '+':
                 y_pos = gene_y_fwd
-                symbol = 'triangle-right'
-                # Draw arrow head at end? No, just use shape.
             else:
                 y_pos = gene_y_rev
-                symbol = 'triangle-left'
                 
             # Draw gene as an arrow (SVG path)
-            # Make it thicker for visibility
-            thickness = y_limit * 0.02
-            half_thick = thickness
+            thickness = 0.4
+            half_thick = thickness / 2
             
             # Arrow head size
-            # Fixed size relative to view width (1%)
             view_width = end - start
             head_len = view_width * 0.01
-            
-            # Ensure head doesn't exceed gene length (for very short genes)
             head_len = min(head_len, f_end - f_start)
             
             if f_strand == '+':
                 # Right arrow >
-                # Points: (start, top), (end-head, top), (end, mid), (end-head, bottom), (start, bottom)
                 y_top = y_pos + half_thick
                 y_bot = y_pos - half_thick
                 y_mid = y_pos
@@ -407,7 +411,6 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
                 
             else:
                 # Left arrow <
-                # Points: (start+head, top), (end, top), (end, bottom), (start+head, bottom), (start, mid)
                 y_top = y_pos + half_thick
                 y_bot = y_pos - half_thick
                 y_mid = y_pos
@@ -423,26 +426,32 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
                 path=path,
                 line=dict(color=color, width=1),
                 fillcolor=color,
-                opacity=0.6
+                opacity=0.6,
+                row=2, col=1
             )
             
-            # Add label (above for fwd, below for rev)
-            label_y = y_pos + (thickness * 2.5) if f_strand == '+' else y_pos - (thickness * 2.5)
-            
+            # Add label
             fig.add_annotation(
                 x=(f_start + f_end) / 2,
-                y=label_y,
+                y=y_pos,
                 text=f_name,
                 showarrow=False,
                 font=dict(color="black", size=10),
+                yshift=15 if f_strand == '+' else -15,
+                row=2, col=1
             )
 
     fig.update_layout(
         title=f"Range Inspector ({start} - {end})",
-        xaxis_title="Genomic Position",
-        yaxis_title="Binding Score (+ / -)",
-        xaxis=dict(range=[start, end]),
-        yaxis=dict(range=[-y_limit, y_limit]), # Symmetric Y-axis
+        height=plot_height,
+        hovermode="closest",
+        showlegend=True
+    )
+    
+    # Update axes
+    fig.update_xaxes(title_text="Genomic Position", row=2, col=1, range=[start, end])
+    fig.update_yaxes(title_text="Score", row=1, col=1, range=[-y_limit, y_limit])
+    fig.update_yaxes(title_text="Features", row=2, col=1, range=[-2, 2], showticklabels=False, showgrid=False)
         height=plot_height,
         hovermode="closest"
     )
@@ -1188,7 +1197,7 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             with gr.Row():
                 feature_types = gr.CheckboxGroup(
                     ["gene", "CDS", "tRNA", "rRNA", "exon"], 
-                    value=["gene", "CDS", "tRNA", "rRNA"], 
+                    value=["gene", "tRNA", "rRNA"], 
                     label="Show Features"
                 )
                 plot_height = gr.Slider(minimum=400, maximum=1200, value=600, step=50, label="Plot Height (px)")
