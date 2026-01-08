@@ -1098,8 +1098,8 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
 
 # --- UI Definition ---
 
-with gr.Blocks(title="PPR Motif Analyzer (Unified)") as demo:
-    gr.Markdown("# PPR Motif Analyzer (Unified Workflow)")
+with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
+    gr.Markdown("# P-type PPR Prediction Program (PPPRPP)")
     gr.Markdown("Input your Protein sequence (to discover motifs) and RNA sequence (target) to analyze binding sites.")
     
     with gr.Row():
