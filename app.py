@@ -929,27 +929,36 @@ def visualize_single_site(row):
     except Exception as e:
         return go.Figure(layout=dict(title=f"Error generating plot: {e}"))
 
-def update_detail_plot(evt: gr.SelectData, df):
+def update_detail_plot(evt: gr.SelectData, df, analysis_context):
     if df is None or df.empty:
-        return go.Figure(), ""
+        # Return 4 outputs to match show_manual_detail signature
+        return gr.update(choices=[]), gr.update(value=None), go.Figure(), ""
         
     try:
         x_val = evt.value['x']
         y_val = evt.value['y']
         
+        # Approximate matching for floats
         mask = (df['Genome_Position'] == x_val) & \
                ((np.isclose(df['PPR_Binding_Score'], y_val)) | (np.isclose(df['PPR_Binding_Score'], -y_val)))
         
         row = df[mask]
         
         if row.empty:
-            return go.Figure(layout=dict(title="No data found for clicked point")), ""
+             return gr.update(choices=[]), gr.update(value=None), go.Figure(layout=dict(title="No data found for clicked point")), ""
             
         best_row = row.iloc[0]
-        return visualize_single_site(best_row), best_row['Segment']
+        # Strand is capitalized in DF: "Forward", "Reverse"
+        strand = best_row['Strand']
+        
+        # Delegate to show_manual_detail to handle Gap Selection logic (Dynamic Mode if context available)
+        return show_manual_detail(str(x_val), strand, df, analysis_context)
         
     except Exception as e:
-        return go.Figure(layout=dict(title=f"Error: {e}")), ""
+        print(f"Error in click handler: {e}")
+        return gr.update(choices=[]), gr.update(value=None), go.Figure(layout=dict(title=f"Error: {e}")), ""
+        
+
 
 def show_manual_detail(manual_pos, manual_strand, df, analysis_context):
     if df is None or df.empty:
@@ -1498,7 +1507,11 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
     )
     
     try:
-        plot_browser.select(update_detail_plot, inputs=[df_state], outputs=[plot_detail, detail_seq])
+        plot_browser.select(
+            update_detail_plot, 
+            inputs=[df_state, analysis_context_state], 
+            outputs=[gap_select, manual_data_state, plot_detail, detail_seq]
+        )
     except AttributeError:
         print("WARNING: plot_browser.select() failed. Interactive features disabled.")
     except Exception as e:
