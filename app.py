@@ -1414,7 +1414,9 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
                 return go.Figure(layout=dict(title="No CSV file found. Run analysis first.")), ""
             try:
                 df = pd.read_csv(csv_file.name)
-                return show_manual_detail(pos, strand, df)
+                # Pass empty context for static mode, discard dropdown/state updates
+                _, _, fig, seq = show_manual_detail(pos, strand, df, {})
+                return fig, seq
             except Exception as e:
                 return go.Figure(layout=dict(title=f"Error: {e}")), ""
 
