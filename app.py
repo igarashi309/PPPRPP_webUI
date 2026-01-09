@@ -12,6 +12,7 @@ from pathlib import Path
 import glob
 from Bio import SeqIO
 import io
+import shutil
 
 def cleanup_temp_files():
     """Cleans up temporary files from previous runs."""
@@ -337,6 +338,17 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     # Actually, we appended _results to final_job_name, so just add .csv
     csv_path = os.path.join(TMP_DIR, f"{final_job_name}.csv")
     df_output.to_csv(csv_path, index=False)
+    
+    # Save accompanying motifs file for Load Result
+    if motifs_file and os.path.exists(motifs_file):
+        # Naming convention matches load_result expectation: {job}_motifs.txt
+        # final_job_name ends with _results
+        motifs_dest_name = f"{final_job_name.replace('_results', '_motifs')}.txt"
+        dest_motifs = os.path.join(TMP_DIR, motifs_dest_name)
+        try:
+            shutil.copy2(motifs_file, dest_motifs)
+        except Exception as e:
+            print(f"Warning: Failed to save motifs file: {e}")
 
     # 5. Visualization (Genome Browser)
     fig = plot_genome_browser(df_output, seq_id, analysis_type)
