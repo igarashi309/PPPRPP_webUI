@@ -747,7 +747,7 @@ def visualize_motifs(motifs_file, analysis_title=None):
         print(f"Error visualizing motifs: {e}")
         return pd.DataFrame(), go.Figure()
 
-def generate_detail_figure(row):
+def visualize_single_site(row):
     """Helper to generate the detail bar chart for a single row using Plotly."""
     try:
         def parse_list_col(val):
@@ -922,7 +922,7 @@ def update_detail_plot(evt: gr.SelectData, df):
             return go.Figure(layout=dict(title="No data found for clicked point")), ""
             
         best_row = row.iloc[0]
-        return generate_detail_figure(best_row), best_row['Segment']
+        return visualize_single_site(best_row), best_row['Segment']
         
     except Exception as e:
         return go.Figure(layout=dict(title=f"Error: {e}")), ""
@@ -1024,32 +1024,7 @@ def inspect_gap_select(selection_str, data_map):
         import traceback
         traceback.print_exc()
         return go.Figure(layout=dict(title=f"Error: {e}")), ""
-        if match_gap:
-            g_size = int(match_gap.group(1))
-            g_idx = int(match_gap.group(2))
-        else:
-            # Check No Gap
-            if "No Gap" in selection_str:
-                g_size = 0
-                g_idx = 0
-        
-        # Filter
-        mask = (df['Genome_Position'] == target_pos) & \
-               (df['Strand'] == strand) & \
-               (df['Gap_Size'] == g_size)
-        
-        if g_size > 0:
-            mask = mask & (df['Gap_Index'] == g_idx)
-               
-        rows = df[mask]
-        if rows.empty:
-            return go.Figure(layout=dict(title="Could not find selected variation")), ""
-            
-        row = rows.iloc[0]
-        return generate_detail_figure(row), row['Segment']
-        
-    except Exception as e:
-        return go.Figure(layout=dict(title=f"Error updating: {e}")), ""
+
 
 # --- IGV Helper Removed ---
 # def generate_igv_html(fasta_path, bedgraph_path, locus_id): ...
@@ -1129,7 +1104,8 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
     
     try:
         # We need to adapt the return values
-        result_msg, csv_path, fig_browser, fig_detail, df, motif_df, motif_fig, _ = run_unified_analysis(
+        # Return: status_msg, csv_path, motif_fig, fig_browser, range_plot, df_output, analysis_context, dd_main, dd_ncbi
+        result_msg, csv_path, motif_fig, fig_browser, _, df, _, _, _ = run_unified_analysis(
             protein_text, protein_file, rna_text, None, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name
         )
         log(f"Analysis result: {result_msg}")
