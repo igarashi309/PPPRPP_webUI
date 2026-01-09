@@ -126,7 +126,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
             rna_input = DEFAULT_RNA
 
     if not rna_input:
-        return "Error: Please provide an RNA sequence.", None, None, None, None, None
+        return "Error: Please provide an RNA sequence.", None, None, None, None, None, None, None, None
         
     sequence = ""
     seq_id = job_name
@@ -161,10 +161,10 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
             motifs_file = Path(output_dir) / f"{seq_id}_motifs.txt"
             
         if not pkl_path:
-             return "Error: Motif discovery failed.", None, None, None, None, None, None, None
+             return "Error: Motif discovery failed.", None, None, None, None, None, None, None, None
 
     except Exception as e:
-        return f"Error during discovery: {e}", None, None, None, None, None, None, None
+        return f"Error during discovery: {e}", None, None, None, None, None, None, None, None
     finally:
         if os.path.exists(tmp_fasta_path):
             os.remove(tmp_fasta_path)
@@ -177,7 +177,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
         motif_data = ppr_io.load_ppr_data_from_pickle(pkl_path)
         ppr_name = os.path.basename(pkl_path)
     except Exception as e:
-        return f"Error loading motifs: {e}", None, None, None, None, None, None, None
+        return f"Error loading motifs: {e}", None, None, None, None, None, None, None, None
 
     # Run Analysis (Both Strands)
     min_front = 1 # Allow gaps closer to ends
@@ -187,7 +187,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     # Prepare RNA sequence
     # rna_input is already defined from rna_text or rna_file earlier.
     if not rna_input:
-        return "Error: No RNA sequence provided.", None, None, None, None, None, None, None
+        return "Error: No RNA sequence provided.", None, None, None, None, None, None, None, None
 
     # Parse RNA FASTA
     try:
@@ -270,9 +270,9 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return f"Error during analysis: {e}", None, None, None, None, None, None, None
+        return f"Error during analysis: {e}", None, None, None, None, None, None, None, None
     if not all_scores["Position_Relative"]:
-        return "Error: No binding sites found.", None, None, None, None, None, None, None
+        return "Error: No binding sites found.", None, None, None, None, None, None, None, None
 
     # Create DataFrame
     df_output = pd.DataFrame(all_scores)
