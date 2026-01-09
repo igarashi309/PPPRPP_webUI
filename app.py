@@ -61,13 +61,13 @@ def list_past_results():
 
 def load_result(filename):
     """Loads a past result CSV and updates the UI."""
-    # Output signature: status, csv, browser, motif_plot, motif_table, range_plot, df_state
+    # Output signature: status, csv, browser, motif_plot, motif_table, range_plot, df_state, analysis_context
     if not filename:
-        return "No file selected.", None, go.Figure(), go.Figure(), pd.DataFrame(), go.Figure(), None
+        return "No file selected.", None, go.Figure(), go.Figure(), pd.DataFrame(), go.Figure(), None, {}
     
     path = os.path.join(TMP_DIR, filename)
     if not os.path.exists(path):
-        return f"File not found: {filename}", None, go.Figure(), go.Figure(), pd.DataFrame(), go.Figure(), None
+        return f"File not found: {filename}", None, go.Figure(), go.Figure(), pd.DataFrame(), go.Figure(), None, {}
         
     try:
         df = pd.read_csv(path)
@@ -88,10 +88,11 @@ def load_result(filename):
              # Extract simple title
              motif_df, motif_fig = visualize_motifs(motif_path, analysis_title=f"{job_name} Motifs")
         
-        return f"Loaded result: {filename}", path, fig, motif_fig, motif_df, go.Figure(), df
+        # Return empty dict for analysis_context to force Static Mode in Detail Inspector
+        return f"Loaded result: {filename}", path, fig, motif_fig, motif_df, go.Figure(), df, {}
     except Exception as e:
         print(f"Error loading result: {e}")
-        return f"Error loading: {e}", None, go.Figure(), go.Figure(), pd.DataFrame(), go.Figure(), None
+        return f"Error loading: {e}", None, go.Figure(), go.Figure(), pd.DataFrame(), go.Figure(), None, {}
 
 def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name):
     # Construct analysis_type string
@@ -1470,7 +1471,7 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
     # 5. Load Results logic (Main Tab & NCBI Tab)
     
     # Common Output List
-    load_outputs = [status_output, csv_output, plot_browser, motif_plot, motif_table, range_plot, df_state]
+    load_outputs = [status_output, csv_output, plot_browser, motif_plot, motif_table, range_plot, df_state, analysis_context_state]
     
     # Main Tab
     result_selector.select(load_result, inputs=[result_selector], outputs=load_outputs)
