@@ -37,6 +37,7 @@ print(f"Gradio Version: {gr.__version__}")
 
 # --- Constants ---
 TMP_DIR = tempfile.gettempdir()
+VERSION = "v0.0.8"
 
 DEFAULT_PROTEIN = """>PPR791(Rf1a)_IR24
 MARRAASRAVGALRSDGSIQGRGGRAGGSGAEDARHVFDELLRRGRGASIYGLNRALADVARDSPAAAVSRYNRMARAGADEVTPDLCTYGILIGCCCRAGRLDLGFAALGNVIKKGFRVDAIAFTPLLKGLCADKRTSDAMDIVLRRMTELGCIPNVFSYNILLKGLCDENRSQEALELLHMMADDRGGGSPPDVVSYTTVINGFFKEGDSDKAYSTYHEMLDRGILPDVVTYNSIIAALCKAQAMDKAMEVLNTMVKNGVMPDCMTYNSILHGYCSSGQPKEAIGFLKKMRSDGVEPDVVTYSLLMDYLCKNGRCMEARKIFDSMTKRGLKPEITTYGTLLQGYATKGALVEMHGLLDLMVRNGIHPDHYVFSILICAYAKQGKVDQAMLVFSKMRQQGLNPNAVTYGAVIGILCKSGRVEDAMLYFEQMIDEGLSPGNIVYNSLIHGLCTCNKWERAEELILEMLDRGICLNTIFFNSIIDSHCKEGRVIESEKLFELMVRIGVKPNVITYNTLINGYCLAGKMDEAMKLLSGMVSVGLKPNTVTYSTLINGYCKISRMEDALVLFKEMESSGVSPDIITYNIILQGLFQTRRTAAAKELYVRITESGTQIELSTYNIILHGLCKNKLTDDALQMFQNLCLMDLKLEARTFNIMIDALLKVGRNDEAKDLFVAFSSNGLVPNYWTYRLMAENIIGQGLLEELDQLFLSMEDNGCTVDSGMLNFIVRELLQRGEITRAGTYLSMIDEKHFSLEASTASLFIDLLSGGKYQEYYRFLPEKYKSFIESLSC"""
@@ -684,7 +685,8 @@ def visualize_motifs(motifs_file, analysis_title=None):
                     thickness=15
                 )
             ),
-            hoverinfo='skip'
+            hoverinfo='skip',
+            showlegend=False
         ))
         
         # Layout settings
@@ -697,7 +699,7 @@ def visualize_motifs(motifs_file, analysis_title=None):
             xaxis=dict(title="Amino Acid Position", zeroline=False),
             yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-0.6, 0.6]),
             height=300,
-            plot_bgcolor='white',
+            # plot_bgcolor='white', # Removed to allow default light background
             margin=dict(t=80) # Increase top margin for subtitle
         )
         
@@ -1217,7 +1219,7 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
 # --- UI Definition ---
 
 with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
-    gr.Markdown("# P-type PPR Prediction Program (PPPRPP)")
+    gr.Markdown(f"# P-type PPR Prediction Program (PPPRPP) <span style='font-size: 0.5em; font-weight: normal; color: #777;'>{VERSION}</span>")
     gr.Markdown("Input your Protein sequence (to discover motifs) and RNA sequence (target) to analyze binding sites.")
     
     with gr.Row():
@@ -1405,6 +1407,8 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
         inputs=[gap_select, manual_pos, manual_strand, df_state],
         outputs=[plot_detail, detail_seq]
     )
+
+    gr.Markdown(f"---\n**PPPRPP {VERSION}** | Developed by Keisuke Igarashi | [GitHub Repository](https://github.com/igarashi309/PPPRPP_webUI)")
 
     
     gr.Markdown("""
