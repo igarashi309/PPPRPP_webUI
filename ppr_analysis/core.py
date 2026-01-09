@@ -28,14 +28,15 @@ def generate_gap_variations(motif_labels, ppr_scores, min_front, min_back, max_g
     """
     gap_variations = [(motif_labels, ppr_scores, 0, 0)]  # GAP 0, Pos 0
 
-    # Iterate all gaps from 1 to max_gap
-    # Optimization removed: check all variations to ensure intermediate gaps are found.
-    if max_gap > 0:
-        for gap_size in range(1, max_gap + 1):
-            for front_size in range(min_front, len(motif_labels) - min_back + 1):
-                gap_variation = motif_labels[:front_size] + ['--'] * gap_size + motif_labels[front_size:]
-                gap_scores = ppr_scores[:front_size] + [0] * gap_size + ppr_scores[front_size:]
-                gap_variations.append((gap_variation, gap_scores, gap_size, front_size))
+    # Optimization: User requested ONLY Gap 0 and Gap N (target).
+    # Skip intermediate gaps (1..N-1) to save time, as confirmed by User.
+    target_gaps = [int(max_gap)] if max_gap > 0 else []
+    
+    for gap_size in target_gaps:
+        for front_size in range(min_front, len(motif_labels) - min_back + 1):
+            gap_variation = motif_labels[:front_size] + ['--'] * gap_size + motif_labels[front_size:]
+            gap_scores = ppr_scores[:front_size] + [0] * gap_size + ppr_scores[front_size:]
+            gap_variations.append((gap_variation, gap_scores, gap_size, front_size))
     return gap_variations
 
 def calculate_binding_score_numpy(rna_seq, motif_binding_scores, motif_labels, ppr_scores):
