@@ -40,6 +40,10 @@ def parse_domtblout(domtblout_path):
                 start = int(parts[19]) # Using envelope coordinates often better for coverage
                 end = int(parts[20])
                 
+                # Filter negative scores (worse than null hypothesis)
+                if score <= 0:
+                    continue
+                
                 # Filter weak hits (heuristic similar to original)
                 # Original uses E-value < 0.1 or similar?
                 # User log showed -E 0.1 in hmmsearch command.
