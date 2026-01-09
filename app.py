@@ -12,6 +12,7 @@ from pathlib import Path
 import glob
 from Bio import SeqIO
 import io
+import shutil
 
 def cleanup_temp_files():
     """Cleans up temporary files from previous runs."""
@@ -37,7 +38,22 @@ print(f"Gradio Version: {gr.__version__}")
 
 # --- Constants ---
 TMP_DIR = tempfile.gettempdir()
+
 VERSION = "v0.0.8"
+
+custom_css = """
+#debug_console {
+    position: fixed;
+    bottom: 10px;
+    right: 10px;
+    width: 400px;
+    height: 300px;
+    z-index: 9999;
+    opacity: 0.9;
+    border: 1px solid #ccc;
+    box-shadow: 0 0 10px rgba(0,0,0,0.2);
+}
+"""
 
 DEFAULT_PROTEIN = """>PPR791(Rf1a)_IR24
 MARRAASRAVGALRSDGSIQGRGGRAGGSGAEDARHVFDELLRRGRGASIYGLNRALADVARDSPAAAVSRYNRMARAGADEVTPDLCTYGILIGCCCRAGRLDLGFAALGNVIKKGFRVDAIAFTPLLKGLCADKRTSDAMDIVLRRMTELGCIPNVFSYNILLKGLCDENRSQEALELLHMMADDRGGGSPPDVVSYTTVINGFFKEGDSDKAYSTYHEMLDRGILPDVVTYNSIIAALCKAQAMDKAMEVLNTMVKNGVMPDCMTYNSILHGYCSSGQPKEAIGFLKKMRSDGVEPDVVTYSLLMDYLCKNGRCMEARKIFDSMTKRGLKPEITTYGTLLQGYATKGALVEMHGLLDLMVRNGIHPDHYVFSILICAYAKQGKVDQAMLVFSKMRQQGLNPNAVTYGAVIGILCKSGRVEDAMLYFEQMIDEGLSPGNIVYNSLIHGLCTCNKWERAEELILEMLDRGICLNTIFFNSIIDSHCKEGRVIESEKLFELMVRIGVKPNVITYNTLINGYCLAGKMDEAMKLLSGMVSVGLKPNTVTYSTLINGYCKISRMEDALVLFKEMESSGVSPDIITYNIILQGLFQTRRTAAAKELYVRITESGTQIELSTYNIILHGLCKNKLTDDALQMFQNLCLMDLKLEARTFNIMIDALLKVGRNDEAKDLFVAFSSNGLVPNYWTYRLMAENIIGQGLLEELDQLFLSMEDNGCTVDSGMLNFIVRELLQRGEITRAGTYLSMIDEKHFSLEASTASLFIDLLSGGKYQEYYRFLPEKYKSFIESLSC"""
@@ -54,20 +70,75 @@ def list_past_results():
     files = glob.glob(os.path.join(TMP_DIR, "*_results.csv"))
     # Sort by mtime
     files.sort(key=os.path.getmtime, reverse=True)
-    return [os.path.basename(f) for f in files]
+    f_list = [os.path.basename(f) for f in files]
+    # Return updates for BOTH dropdowns (Main Tab and NCBI Tab)
+    return gr.update(choices=f_list, value=None), gr.update(choices=f_list, value=None)
+
+
+import json
+import ast
+
+def load_csv_with_parsing(path):
+    """Loads CSV and parses list columns back to objects."""
+    try:
+        df = pd.read_csv(path)
+        
+        # Columns that need parsing
+        list_cols = ['PPR_Binding_Scores_List', 'PPR_Motif_Scores', 'Predicted PPR Motif Scores List', 'Motif_Confidence_Scores']
+        
+        for col in list_cols:
+            if col in df.columns:
+                # Use ast.literal_eval for safety, fallback to json if needed, or crude eval
+                # The columns are likely string repr of lists: "[1.0, 2.0]"
+                def parse_list(x):
+                    if isinstance(x, str):
+                        try:
+                            # Try literal_eval
+                            val = ast.literal_eval(x)
+                            # If result is still string (double quoted), try again?
+                            if isinstance(val, str) and val.strip().startswith('[') and val.strip().endswith(']'):
+                                try:
+                                    val = ast.literal_eval(val)
+                                except:
+                                    pass
+                            return val
+                        except:
+                            # Fallback: simple strip and split
+                            s = x.strip()
+                            if (s.startswith('[') and s.endswith(']')) or (s.startswith("'[") and s.endswith("]'")) or (s.startswith('"[') and s.endswith(']"')):
+                                # Strip quotes if present
+                                if s.startswith("'") or s.startswith('"'):
+                                    s = s[1:-1]
+                                # Strip brackets
+                                if s.startswith('[') and s.endswith(']'):
+                                    s = s[1:-1]
+                                if not s.strip(): return []
+                                try:
+                                    return [float(i) for i in s.split(',')]
+                                except:
+                                    return []
+                            return []
+                    return x
+                df[col] = df[col].apply(parse_list)
+        return df
+    except Exception as e:
+        print(f"Error parsing CSV: {e}")
+        return pd.DataFrame()
 
 def load_result(filename):
     """Loads a past result CSV and updates the UI."""
-    # Output signature: status_msg, csv_path, fig, fig_detail, df_state, motif_df, motif_fig
+    # Output signature: status, csv, browser, motif_plot, motif_table, range_plot, df_state, analysis_context
     if not filename:
-        return "No file selected.", None, go.Figure(), go.Figure(), None, pd.DataFrame(), go.Figure()
+        return "No file selected.", None, go.Figure(), go.Figure(), pd.DataFrame(), go.Figure(), None, {}
     
     path = os.path.join(TMP_DIR, filename)
     if not os.path.exists(path):
-        return f"File not found: {filename}", None, go.Figure(), go.Figure(), None, pd.DataFrame(), go.Figure()
+        return f"File not found: {filename}", None, go.Figure(), go.Figure(), pd.DataFrame(), go.Figure(), None, {}
         
     try:
-        df = pd.read_csv(path)
+        df = load_csv_with_parsing(path)
+        if df.empty:
+            return "Error parsing CSV file.", None, go.Figure(), go.Figure(), pd.DataFrame(), go.Figure(), None, {}
         # Re-plot
         job_name = filename.replace("_results.csv", "")
         # Analysis type from DF if available
@@ -75,9 +146,21 @@ def load_result(filename):
         
         fig = plot_genome_browser(df, seq_id=job_name, analysis_type=atype)
         
-        return f"Loaded result: {filename}", path, fig, go.Figure(), df, pd.DataFrame(), go.Figure()
+        # Try to find corresponding motif file
+        # Naming convention: {job}_results.csv -> {job}_motifs.txt
+        motif_path = path.replace("_results.csv", "_motifs.txt")
+        motif_fig = go.Figure()
+        motif_df = pd.DataFrame()
+        
+        if os.path.exists(motif_path):
+             # Extract simple title
+             motif_df, motif_fig = visualize_motifs(motif_path, analysis_title=f"{job_name} Motifs")
+        
+        # Return empty dict for analysis_context to force Static Mode in Detail Inspector
+        return f"Loaded result: {filename}", path, fig, motif_fig, motif_df, go.Figure(), df, {}
     except Exception as e:
-        return f"Error loading: {e}", None, go.Figure(), go.Figure(), None, pd.DataFrame(), go.Figure()
+        print(f"Error loading result: {e}")
+        return f"Error loading: {e}", None, go.Figure(), go.Figure(), pd.DataFrame(), go.Figure(), None, {}
 
 def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name):
     # Construct analysis_type string
@@ -111,7 +194,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
             rna_input = DEFAULT_RNA
 
     if not rna_input:
-        return "Error: Please provide an RNA sequence.", None, None, None, None, None
+        return "Error: Please provide an RNA sequence.", None, None, None, None, None, None, None, None
         
     sequence = ""
     seq_id = job_name
@@ -146,10 +229,10 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
             motifs_file = Path(output_dir) / f"{seq_id}_motifs.txt"
             
         if not pkl_path:
-             return "Error: Motif discovery failed.", None, None, None, None, None, None, None
+             return "Error: Motif discovery failed.", None, None, None, None, None, None, None, None
 
     except Exception as e:
-        return f"Error during discovery: {e}", None, None, None, None, None, None, None
+        return f"Error during discovery: {e}", None, None, None, None, None, None, None, None
     finally:
         if os.path.exists(tmp_fasta_path):
             os.remove(tmp_fasta_path)
@@ -162,7 +245,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
         motif_data = ppr_io.load_ppr_data_from_pickle(pkl_path)
         ppr_name = os.path.basename(pkl_path)
     except Exception as e:
-        return f"Error loading motifs: {e}", None, None, None, None, None, None, None
+        return f"Error loading motifs: {e}", None, None, None, None, None, None, None, None
 
     # Run Analysis (Both Strands)
     min_front = 1 # Allow gaps closer to ends
@@ -172,7 +255,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     # Prepare RNA sequence
     # rna_input is already defined from rna_text or rna_file earlier.
     if not rna_input:
-        return "Error: No RNA sequence provided.", None, None, None, None, None, None, None
+        return "Error: No RNA sequence provided.", None, None, None, None, None, None, None, None
 
     # Parse RNA FASTA
     try:
@@ -213,13 +296,18 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
         "Genome_Position": []
     }
     
+    # Construct lookup key for core.analyze_ppr_data
+    # core.py returns fixed keys: 'yan_gap0_ps' or 'yan_gap_ps' (generic 'gap' for any >0)
+    lookup_gap_str = "gap" if max_gap_size > 0 else "gap0"
+    lookup_key = f"{method}_{lookup_gap_str}_{ps_str}"
+    
     predicted_scores = [] # Default empty
     
     try:
         # Forward
         scores_fwd = core.analyze_ppr_data(motif_data, rna_seq, min_front, min_back, max_gap, predicted_scores, ppr_name)
-        if analysis_type in scores_fwd:
-            fwd_data = scores_fwd[analysis_type]
+        if lookup_key in scores_fwd:
+            fwd_data = scores_fwd[lookup_key]
             # Extend all_scores with fwd_data (Dict)
             for k, v in fwd_data.items():
                  if k in all_scores:
@@ -233,8 +321,8 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
         # Reverse
         rev_seq = core.get_reverse_complement(rna_seq)
         scores_rev = core.analyze_ppr_data(motif_data, rev_seq, min_front, min_back, max_gap, predicted_scores, ppr_name)
-        if analysis_type in scores_rev:
-            rev_data = scores_rev[analysis_type]
+        if lookup_key in scores_rev:
+            rev_data = scores_rev[lookup_key]
             # Extend all_scores with rev_data (Dict)
             for k, v in rev_data.items():
                  if k in all_scores:
@@ -250,9 +338,9 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return f"Error during analysis: {e}", None, None, None, None, None, None, None
+        return f"Error during analysis: {e}", None, None, None, None, None, None, None, None
     if not all_scores["Position_Relative"]:
-        return "Error: No binding sites found.", None, None, None, None, None, None, None
+        return "Error: No binding sites found.", None, None, None, None, None, None, None, None
 
     # Create DataFrame
     df_output = pd.DataFrame(all_scores)
@@ -293,6 +381,19 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     # So we MUST include the input string.
     final_job_name = f"{clean_job_name}_{clean_prot}_{clean_rna}_{analysis_type}"
     
+    # Create Analysis Context for Dynamic Detail Inspection
+    analysis_context = {
+        'motif_data': motif_data,
+        'rna_seq': rna_seq,
+        'min_front': min_front, 
+        'min_back': min_back,
+        'max_gap': max_gap,
+        'predicted_scores': predicted_scores,
+        'use_ps_score': use_ps_score,
+        'method': method, # 'yan' or 'kobayashi'
+        'ppr_name': ppr_name
+    }
+    
     # Construct friendly filename parts
     friendly_method = "P-type" if method == "yan" else "PLS-type"
     friendly_gap = f"Gap{int(max_gap_size)}"
@@ -306,6 +407,17 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     # Actually, we appended _results to final_job_name, so just add .csv
     csv_path = os.path.join(TMP_DIR, f"{final_job_name}.csv")
     df_output.to_csv(csv_path, index=False)
+    
+    # Save accompanying motifs file for Load Result
+    if motifs_file and os.path.exists(motifs_file):
+        # Naming convention matches load_result expectation: {job}_motifs.txt
+        # final_job_name ends with _results
+        motifs_dest_name = f"{final_job_name.replace('_results', '_motifs')}.txt"
+        dest_motifs = os.path.join(TMP_DIR, motifs_dest_name)
+        try:
+            shutil.copy2(motifs_file, dest_motifs)
+        except Exception as e:
+            print(f"Warning: Failed to save motifs file: {e}")
 
     # 5. Visualization (Genome Browser)
     fig = plot_genome_browser(df_output, seq_id, analysis_type)
@@ -314,13 +426,19 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     # 6. Visualize Motifs
     motif_df, motif_fig = pd.DataFrame(), go.Figure()
     if motifs_file and os.path.exists(motifs_file):
-        # Create a friendly title for the plot
         friendly_title = f"Method: {friendly_method} | Gap: {int(max_gap_size)} | Score: {'On' if use_ps_score else 'Off'}"
         motif_df, motif_fig = visualize_motifs(motifs_file, analysis_title=friendly_title)
     else:
-        status_msg += "\nWarning: Motif details file not found for visualization."
-
-    return "Analysis Complete", csv_path, fig, go.Figure(), df_output, motif_df, motif_fig, gr.update(choices=list_past_results(), value=f"{final_job_name}.csv")
+        # Fallback empty
+        motif_df, motif_fig = pd.DataFrame(), go.Figure()
+        
+    status_msg += f"\nAnalysis Complete. Found {len(df_output)} sites."
+    
+    # Get updated file list for dropdowns
+    dd_main, dd_ncbi = list_past_results()
+    
+    # Outputs order: status, csv, motif_plot, browser_plot, range_plot, df_state, context, main_dd, ncbi_dd
+    return status_msg, csv_path, motif_fig, fig, go.Figure(), df_output, analysis_context, dd_main, dd_ncbi
     
 def parse_analysis_type(atype_str):
     """Parses analysis_type string into readable format."""
@@ -479,6 +597,8 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
     
     if gff_path and os.path.exists(gff_path):
         features = ncbi.parse_gff(gff_path, start, end)
+        print(f"DEBUG: Range {start}-{end}, GFF: {gff_path}, Features Found: {len(features)}")
+        print(f"DEBUG: Selected Feature Types: {feature_types}")
         
         gene_y_fwd = 0.5
         gene_y_rev = -0.5
@@ -486,11 +606,18 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
         for feat in features:
             f_type = feat['type']
             if f_type not in feature_types:
+                # print(f"DEBUG: Skipping {f_type}")
                 continue
+            
+            print(f"DEBUG: Plotting {f_type} at {feat['start']}-{feat['end']}")
                 
             f_start = max(start, feat['start'])
             f_end = min(end, feat['end'])
             f_strand = feat['strand']
+            
+            # Extract name
+            attrs = feat.get('attributes', {})
+            f_name = attrs.get('Name', attrs.get('gene', attrs.get('ID', f_type)))
             
             # Color by type
             if f_type == 'CDS': color = 'orange'
@@ -541,7 +668,7 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
             
     # Add title with conditions
     fig.update_layout(
-        title=f"Range Browser - {seq_id}<br><sup>{readable_condition}</sup>",
+        title=f"{seq_id}<br><sup>{readable_condition}</sup>",
         height=plot_height,
         hovermode="closest",
         margin=dict(t=80, b=50, l=50, r=50)
@@ -712,34 +839,57 @@ def visualize_motifs(motifs_file, analysis_title=None):
         print(f"Error visualizing motifs: {e}")
         return pd.DataFrame(), go.Figure()
 
-def generate_detail_figure(row):
+def visualize_single_site(row):
     """Helper to generate the detail bar chart for a single row using Plotly."""
+    logs = []
     try:
-        def parse_list_col(val):
-            if isinstance(val, list): return val
-            if pd.isna(val) or val == "": return []
+        logs.append(f"Visualizing Row: Gap={row.get('Gap_Size')}, Pos={row.get('Gap_Index')}")
+        
+        def parse_list_col(val, name):
+            if isinstance(val, list): 
+                logs.append(f"  {name} is list (len={len(val)})")
+                return val
+            if pd.isna(val) or val == "": 
+                logs.append(f"  {name} is empty/NaN")
+                return []
             s = str(val).strip()
+            logs.append(f"  {name} raw string: {s[:50]}...")
+            
+            # Strip outer quotes if present
+            if (s.startswith("'") and s.endswith("'")) or (s.startswith('"') and s.endswith('"')):
+                s = s[1:-1]
             if s.startswith('[') and s.endswith(']'):
                 s = s[1:-1]
             if not s.strip():
                 return []
-            return [float(x) for x in s.split(',')]
+            try:
+                res = [float(x) for x in s.split(',')]
+                logs.append(f"  {name} parsed to list (len={len(res)})")
+                return res
+            except Exception as e:
+                logs.append(f"  Error parsing {name}: {e}")
+                return []
 
-        scores = parse_list_col(row['PPR_Motif_Scores'])
+        scores = parse_list_col(row.get('PPR_Motif_Scores'), 'PPR_Motif_Scores')
         
         # Fallback if PPR_Motif_Scores is empty (happens if predicted_scores was empty during analysis)
         if not scores:
-            scores = parse_list_col(row['PPR_Binding_Scores_List'])
+            logs.append("  PPR_Motif_Scores empty. Falling back to PPR_Binding_Scores_List.")
+            scores = parse_list_col(row.get('PPR_Binding_Scores_List'), 'PPR_Binding_Scores_List')
             
         # Parse motif labels (handle string vs list)
-        motif_labels = row['Motif_Labels_GAP'].split(',') if isinstance(row['Motif_Labels_GAP'], str) else row['Motif_Labels_GAP']
-        segment = row['Segment']
-        total_score = row['Total_Score']
+        m_gap = row.get('Motif_Labels_GAP', '')
+        motif_labels = m_gap.split(',') if isinstance(m_gap, str) else m_gap
+        logs.append(f"  Motif Labels (len={len(motif_labels)}): {motif_labels}")
+        
+        segment = row.get('Segment', '')
+        total_score = row.get('Total_Score', 0)
+        logs.append(f"  Total Score: {total_score}")
         
         # Parse Motif Confidence Scores if available
         confidence_scores = []
         if 'Motif_Confidence_Scores' in row:
-             confidence_scores = parse_list_col(row['Motif_Confidence_Scores'])
+             confidence_scores = parse_list_col(row['Motif_Confidence_Scores'], 'Motif_Confidence_Scores')
         
         # Prepare data for plotting
         x_labels = []
@@ -866,142 +1016,166 @@ def generate_detail_figure(row):
             showlegend=True,
             legend=dict(x=0, y=1.1, orientation="h")
         )
-        return fig
+        return fig, "\n".join(logs)
     except Exception as e:
-        return go.Figure(layout=dict(title=f"Error generating plot: {e}"))
+        import traceback
+        traceback.print_exc()
+        return go.Figure(layout=dict(title=f"Error generating plot: {e}")), f"Error generating plot: {e}"
 
-def update_detail_plot(evt: gr.SelectData, df):
+def update_detail_plot(evt: gr.SelectData, df, analysis_context):
     if df is None or df.empty:
-        return go.Figure(), ""
+        # Return 5 outputs: gap_dd, manual_data, plot, seq, debug_log
+        return gr.update(choices=[]), gr.update(value=None), go.Figure(), "", "No DataFrame loaded."
         
     try:
         x_val = evt.value['x']
         y_val = evt.value['y']
         
+        # Approximate matching for floats
         mask = (df['Genome_Position'] == x_val) & \
                ((np.isclose(df['PPR_Binding_Score'], y_val)) | (np.isclose(df['PPR_Binding_Score'], -y_val)))
         
         row = df[mask]
         
         if row.empty:
-            return go.Figure(layout=dict(title="No data found for clicked point")), ""
+             return gr.update(choices=[]), gr.update(value=None), go.Figure(layout=dict(title="No data found for clicked point")), "", f"No data found for x={x_val}, y={y_val}"
             
         best_row = row.iloc[0]
-        return generate_detail_figure(best_row), best_row['Segment']
+        # Strand is capitalized in DF: "Forward", "Reverse"
+        strand = best_row['Strand']
+        
+        # Delegate to show_manual_detail to handle Gap Selection logic (Dynamic Mode if context available)
+        return show_manual_detail(str(x_val), strand, df, analysis_context)
         
     except Exception as e:
-        return go.Figure(layout=dict(title=f"Error: {e}")), ""
+        print(f"Error in click handler: {e}")
+        return gr.update(choices=[]), gr.update(value=None), go.Figure(layout=dict(title=f"Error: {e}")), "", f"Error in click handler: {e}"
+        
 
-def show_manual_detail(position, strand, df):
-    """
-    Finds available site variations at the given position and strand.
-    Returns: 
-    1. Plot (Initial best) 
-    2. Sequence
-    3. Dropdown choices
-    4. Dropdown value (selected)
-    """
-    if df is None or df.empty:
-        empty_fig = go.Figure(layout=dict(title="No analysis data available."))
-        return empty_fig, "", gr.update(choices=[], value=None), gr.update(choices=[], value=None)
+
+def show_manual_detail(manual_pos, manual_strand, df, analysis_context):
+    logs = [f"--- Manual Detail Search: Pos={manual_pos}, Strand={manual_strand} ---"]
     
-    if position is None:
-        return go.Figure(layout=dict(title="Please enter a position")), "", gr.update(choices=[], value=None), gr.update(choices=[], value=None)
+    if df is None or df.empty:
+        logs.append("No DataFrame loaded (None/Empty).")
+        return gr.update(choices=[]), gr.update(value=None), go.Figure(), "", "\n".join(logs)
 
     try:
-        # Find rows at this position and strand
-        target_pos = int(position)
-        rows = df[(df['Genome_Position'] == target_pos) & (df['Strand'] == strand)]
-        
-        if rows.empty:
-            return go.Figure(layout=dict(title=f"No binding sites found at {target_pos} ({strand})")), "", gr.update(choices=[], value=None), gr.update(choices=[], value=None)
+        if not manual_pos:
+            logs.append("No manual position provided.")
+            return gr.update(choices=[]), gr.update(value=None), go.Figure(), "", "\n".join(logs)
             
-        # Create choices for Dropdown
-        # Format: "Gap Size X (Score: Y)"
-        # Use index as value to likely ensure uniqueness or just use string
-        # Let's use a unique key in the dropdown if possible. Gradio dropdown values are strings.
-        # We will create a list of descriptions.
-        # And we need a way to map back. We can filter again in the update function or store a map in State.
-        # But State is hard to partial update.
-        # Simpler: Make formatted strings "Gap {size} (Score: {score})"
-        
-        choices = []
-        best_row = None
-        best_score = -999999
-        
-        # Sort by score descending to find best
-        rows_sorted = rows.sort_values(by='PPR_Binding_Score', ascending=False)
-        best_row = rows_sorted.iloc[0]
-        best_choice = ""
-        
-        for _, row in rows_sorted.iterrows():
-            gap = row['Gap_Size']
-            score = row['PPR_Binding_Score']
-            gap_idx = row.get('Gap_Index', 0)
+        target_pos = int(manual_pos)
+        logs.append(f"Target Position Parsed: {target_pos}")
+    except ValueError:
+        logs.append("Invalid Position Value.")
+        return gr.update(choices=[]), gr.update(value=None), go.Figure(), "", "\n".join(logs)
+
+    # Determine if we have context to re-calculate (Dynamic Mode) or just DataFrame (Static Mode)
+    use_dynamic = False
+    
+    if analysis_context and isinstance(analysis_context, dict):
+        if 'motif_data' in analysis_context and 'rna_seq' in analysis_context:
+            use_dynamic = True
             
-            # Label with Gap Size AND Gap Position (Index)
-            # Gap Index means "after motif #X"
-            if gap > 0:
-                label = f"Gap Size {gap} at Motif #{gap_idx} (Score: {score:.2f})"
-            else:
-                label = f"No Gap (Score: {score:.2f})"
-                
-            choices.append(label)
-            if row.name == best_row.name:
-                best_choice = label
+    logs.append(f"Mode: {'Dynamic (Re-calc)' if use_dynamic else 'Static (DF Lookup)'}")
+            
+    target_data = []
+    
+    if use_dynamic:
+        # Re-calculate variations for this site
+        motif_data = analysis_context['motif_data']
+        rna_seq = analysis_context['rna_seq']
+        min_front = analysis_context.get('min_front', 1)
+        min_back = analysis_context.get('min_back', 1)
+        max_gap = analysis_context.get('max_gap', 0)
+        predicted_scores = analysis_context.get('predicted_scores', [])
+        use_ps_score = analysis_context.get('use_ps_score', True)
+        metric = analysis_context.get('method', 'yan')
         
-        fig = generate_detail_figure(best_row)
-        return fig, best_row['Segment'], gr.update(choices=choices, value=best_choice), gr.update(visible=True)
+        # Handle strand
+        if manual_strand == "Reverse":
+             seq_to_analyze = core.get_reverse_complement(rna_seq)
+             rev_pos = len(rna_seq) - 1 - target_pos
+             calc_pos = rev_pos
+        else:
+             seq_to_analyze = rna_seq
+             calc_pos = target_pos
+             
+        logs.append(f"Analyzing single site. Calc Pos: {calc_pos}, Max Gap: {max_gap}")
+             
+        # Call core
+        df_site = core.analyze_single_site(motif_data, seq_to_analyze, calc_pos, min_front, min_back, max_gap, predicted_scores, use_ps_score, metric)
+        
+        if not df_site.empty:
+            target_data = df_site.to_dict('records')
+            for d in target_data:
+                d['Strand'] = manual_strand
+                d['Genome_Position'] = target_pos
+                d['PPR_Name'] = analysis_context.get('ppr_name', 'Unknown')
+            logs.append(f"Dynamic Analysis found {len(target_data)} variations.")
+        else:
+            logs.append("Dynamic Analysis returned empty result.")
+            
+    else:
+        # Fallback to static DataFrame
+        logs.append(f"Searching DF with shape {df.shape}")
+        mask = (df['Genome_Position'] == target_pos) & (df['Strand'] == manual_strand)
+        subset = df[mask]
+        target_data = subset.to_dict('records')
+        logs.append(f"Found {len(target_data)} matching rows in DF.")
+
+    if not target_data:
+        logs.append("No target data found.")
+        return gr.update(choices=[], value="No data"), None, go.Figure(), "", "\n".join(logs)
+
+    options = []
+    data_map = {}
+    
+    # Sort by Score descending
+    target_data.sort(key=lambda x: x['PPR_Binding_Score'], reverse=True)
+    
+    for i, row in enumerate(target_data):
+        gap_s = row.get('Gap_Size', 0)
+        gap_idx = row.get('Gap_Index', 0)
+        score = row.get('PPR_Binding_Score', 0)
+        
+        label = f"#{i+1}: Gap Size {gap_s} (Pos {gap_idx}) | Score {score:.2f}"
+        options.append(label)
+        data_map[label] = row
+        
+    default_val = options[0] if options else None
+    logs.append(f"Default Selection: {default_val}")
+    
+    # Call visualize with unpacking
+    if default_val:
+        fig, log_txt = visualize_single_site(data_map[default_val])
+        logs.append("\n--- Visualization Logs ---")
+        logs.append(log_txt)
+    else:
+         fig, log_txt = go.Figure(), "No default val"
+         logs.append("No default val determined.")
+    
+    return gr.update(choices=options, value=default_val), data_map, fig, data_map[default_val]['Segment'] if default_val else "", "\n".join(logs)
+
+def inspect_gap_select(selection_str, data_map):
+    """Updates the plot based on the dropdown selection using cached data_map."""
+    if not selection_str or not data_map:
+        return go.Figure(), "", "No selection or data map."
+        
+    try:
+        row = data_map.get(selection_str)
+        if not row:
+            return go.Figure(layout=dict(title="Selection not found in data")), "", "Selection not found."
+            
+        fig, log_txt = visualize_single_site(row)
+        return fig, row['Segment'], log_txt
         
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return go.Figure(layout=dict(title=f"Error: {e}")), "", gr.update(choices=[], value=None), gr.update(choices=[], value=None)
+        return go.Figure(layout=dict(title=f"Error: {e}")), "", f"Error in dropdown: {e}"
 
-def update_detail_from_dropdown(selection_str, position, strand, df):
-    """Updates the plot based on the dropdown selection."""
-    if not selection_str or df is None:
-        return go.Figure(), ""
-        
-    try:
-        # Parse Gap Size and Score from string "Gap Size {gap} (Score: {score})"
-        # Regex or simple split
-        import re
-        # Find the specific row
-        # Parse gap size/index from string
-        # Regex: Gap Size (\d+) at Motif #(\d+) ... OR No Gap ...
-        
-        target_pos = int(position)
-        g_size = 0
-        g_idx = 0
-        
-        match_gap = re.search(r"Gap Size (\d+) at Motif #(\d+)", selection_str)
-        if match_gap:
-            g_size = int(match_gap.group(1))
-            g_idx = int(match_gap.group(2))
-        else:
-            # Check No Gap
-            if "No Gap" in selection_str:
-                g_size = 0
-                g_idx = 0
-        
-        # Filter
-        mask = (df['Genome_Position'] == target_pos) & \
-               (df['Strand'] == strand) & \
-               (df['Gap_Size'] == g_size)
-        
-        if g_size > 0:
-            mask = mask & (df['Gap_Index'] == g_idx)
-               
-        rows = df[mask]
-        if rows.empty:
-            return go.Figure(layout=dict(title="Could not find selected variation")), ""
-            
-        row = rows.iloc[0]
-        return generate_detail_figure(row), row['Segment']
-        
-    except Exception as e:
-        return go.Figure(layout=dict(title=f"Error updating: {e}")), ""
 
 # --- IGV Helper Removed ---
 # def generate_igv_html(fasta_path, bedgraph_path, locus_id): ...
@@ -1081,7 +1255,8 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
     
     try:
         # We need to adapt the return values
-        result_msg, csv_path, fig_browser, fig_detail, df, motif_df, motif_fig, _ = run_unified_analysis(
+        # Return: status_msg, csv_path, motif_fig, fig_browser, range_plot, df_output, analysis_context, dd_main, dd_ncbi
+        result_msg, csv_path, motif_fig, fig_browser, _, df, _, _, _ = run_unified_analysis(
             protein_text, protein_file, rna_text, None, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name
         )
         log(f"Analysis result: {result_msg}")
@@ -1222,6 +1397,12 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
     gr.Markdown(f"# P-type PPR Prediction Program (PPPRPP) <span style='font-size: 0.5em; font-weight: normal; color: #777;'>{VERSION}</span>")
     gr.Markdown("Input your Protein sequence (to discover motifs) and RNA sequence (target) to analyze binding sites.")
     
+    # Debug Console (Defined early for variable access)
+    # Debug Console (Defined early for variable access, but rendered later)
+    with gr.Group(elem_id="debug_console", render=False) as debug_group:
+        gr.Markdown("### Debug Log")
+        debug_console = gr.Textbox(label="Logs", lines=12, max_lines=20, interactive=False, elem_id="debug_log_text")
+    
     with gr.Row():
         with gr.Column():
             gr.Markdown("### 1. Protein Input (Motif Discovery)")
@@ -1244,7 +1425,9 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             
             # Result Management
             past_results = list_past_results()
-            result_selector = gr.Dropdown(label="Past Results", choices=past_results, value=None, interactive=True)
+            with gr.Row():
+                result_selector = gr.Dropdown(label="Past Results", choices=past_results, value=None, interactive=True, scale=4)
+                load_btn = gr.Button("Load Result", variant="secondary", scale=1)
             
             run_btn = gr.Button("Run Unified Analysis", variant="primary")
             
@@ -1269,7 +1452,7 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
                 manual_strand = gr.Radio(["Forward", "Reverse"], value="Forward", label="Strand")
             
             # Dropdown for Gap Selection (initially hidden/empty)
-            gap_select = gr.Dropdown(label="Select Alignment Variation", choices=[], visible=False)
+            gap_select = gr.Dropdown(label="Select Alignment Variation", choices=[], visible=True)
             
             manual_btn = gr.Button("Search Site")
         with gr.Column(scale=3):
@@ -1303,6 +1486,17 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
         with gr.Row():
             ncbi_download = gr.File(label="Download CSV")
             
+        with gr.Row():
+            with gr.Row():
+                ncbi_result_selector = gr.Dropdown(label="Load Past Result (NCBI)", choices=[], interactive=True, scale=4)
+                ncbi_load_btn = gr.Button("Load Result", variant="secondary", scale=1)
+            
+            # Note: I need to update the event binding at the end of file to use `ncbi_result_selector` instead of `result_selector`
+            # or add a NEW event for `ncbi_result_selector`.
+            # The user requested "NCBI Viewer can also select past results".
+            # So `ncbi_result_selector` should populate `ncbi_download` (CSV).
+
+            
         gr.Markdown("### Range Inspector")
         gr.Markdown("Inspect a specific genomic range with gene annotations.")
         with gr.Row():
@@ -1324,7 +1518,7 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             if not csv_file:
                 return go.Figure(layout=dict(title="No CSV file found. Run analysis first."))
             try:
-                df = pd.read_csv(csv_file.name)
+                df = load_csv_with_parsing(csv_file.name)
                 # GFF file object or path?
                 gff_path = gff_file.name if gff_file else None
                 return plot_range_browser(df, gff_path, int(start), int(end), accession, features, int(height))
@@ -1352,30 +1546,79 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             if not csv_file:
                 return go.Figure(layout=dict(title="No CSV file found. Run analysis first.")), ""
             try:
-                df = pd.read_csv(csv_file.name)
-                return show_manual_detail(pos, strand, df)
+                df = load_csv_with_parsing(csv_file.name)
+                # Pass empty context for static mode, discard dropdown/state updates
+                _, _, fig, seq, log_txt = show_manual_detail(pos, strand, df, {})
+                return fig, seq, log_txt
             except Exception as e:
-                return go.Figure(layout=dict(title=f"Error: {e}")), ""
+                return go.Figure(layout=dict(title=f"Error: {e}")), "", f"Error in ncbi detail: {e}"
 
         ncbi_manual_btn.click(
             on_ncbi_detail_click,
             inputs=[ncbi_download, ncbi_manual_pos, ncbi_manual_strand],
-            outputs=[ncbi_detail_plot, ncbi_detail_seq]
+            outputs=[ncbi_detail_plot, ncbi_detail_seq, debug_console]
         )
         
     # Events
+    analysis_context_state = gr.State({})
+    manual_data_state = gr.State({}) # Store detail data for gap selection 
+
     run_btn.click(
-        run_unified_analysis, 
-        inputs=[prot_text, prot_file, rna_text, rna_file, tool_select, scoring_method, max_gap_size, use_ps_score, job_name_input],
-        outputs=[status_output, csv_output, plot_browser, motif_plot, df_state, motif_table, motif_plot, result_selector]
+        run_unified_analysis,
+        inputs=[
+            prot_text, prot_file,
+            rna_text, rna_file,
+            tool_select, scoring_method, max_gap_size, use_ps_score, job_name_input
+        ],
+        outputs=[
+            status_output, csv_output, motif_plot, plot_browser, range_plot, df_state, analysis_context_state,
+            result_selector, ncbi_result_selector
+        ]
+    )
+
+    # 4. Detail Inspector logic
+    manual_btn.click(
+        show_manual_detail,
+        inputs=[manual_pos, manual_strand, df_state, analysis_context_state],
+        outputs=[gap_select, manual_data_state, plot_detail, detail_seq, debug_console] 
     )
     
-    # Result Selector Event
-    result_selector.select(
-        load_result,
-        inputs=[result_selector],
-        outputs=[status_output, csv_output, plot_browser, plot_detail, df_state, motif_table, motif_plot]
+    # Gap Dropdown Change Event
+    gap_select.change(
+        inspect_gap_select, 
+        inputs=[gap_select, manual_data_state],
+        outputs=[plot_detail, detail_seq, debug_console] # inspect_gap_select returns fig, seq, log
     )
+    
+    # 5. Load Results logic (Main Tab)
+    
+
+    # NCBI Range Browser Logic
+    range_btn.click(
+        on_range_click, 
+        inputs=[ncbi_accession, range_start, range_end, ncbi_download, ncbi_gff_download, feature_types, plot_height], 
+        outputs=[range_plot]
+    )
+
+    # 5. Load Results logic (Main Tab & NCBI Tab)
+    
+    # Common Output List
+    load_outputs = [status_output, csv_output, plot_browser, motif_plot, motif_table, range_plot, df_state, analysis_context_state]
+    
+    # Main Tab
+    result_selector.select(load_result, inputs=[result_selector], outputs=load_outputs)
+    load_btn.click(load_result, inputs=[result_selector], outputs=load_outputs)
+    
+    # NCBI Tab
+    # Use load_result to restore full analysis state even from NCBI tab
+    ncbi_result_selector.select(load_result, inputs=[ncbi_result_selector], outputs=load_outputs)
+    ncbi_load_btn.click(load_result, inputs=[ncbi_result_selector], outputs=load_outputs)
+    
+    # Populate dropdowns on load
+    demo.load(list_past_results, outputs=[result_selector, ncbi_result_selector])
+    
+    # Reset context on load to avoid stale state
+    # demo.load -> can't reset state easily without inputs.
     
     # NCBI Event
     ncbi_btn.click(
@@ -1384,29 +1627,21 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
         outputs=[ncbi_log_output, ncbi_fasta_download, ncbi_bedgraph_download, ncbi_bed_download, ncbi_gff_download, ncbi_download, ncbi_log_output]
     )
     
-    print(f"DEBUG: plot_browser type: {type(plot_browser)}")
-    print(f"DEBUG: plot_browser attributes: {dir(plot_browser)}")
-    
     try:
-        plot_browser.select(update_detail_plot, inputs=[df_state], outputs=[plot_detail, detail_seq])
+        plot_browser.select(
+            update_detail_plot, 
+            inputs=[df_state, analysis_context_state], 
+            outputs=[gap_select, manual_data_state, plot_detail, detail_seq, debug_console]
+        )
     except AttributeError:
         print("WARNING: plot_browser.select() failed. Interactive features disabled.")
     except Exception as e:
         print(f"WARNING: Failed to attach select event: {e}")
         
-    # Manual Inspection Events
-    manual_btn.click(
-        show_manual_detail, # Now returns 4 outputs
-        inputs=[manual_pos, manual_strand, df_state],
-        outputs=[plot_detail, detail_seq, gap_select, gap_select] # Update figure, seq, and choices
-    )
-    
-    # Gap Dropdown Change Event
-    gap_select.change(
-        update_detail_from_dropdown,
-        inputs=[gap_select, manual_pos, manual_strand, df_state],
-        outputs=[plot_detail, detail_seq]
-    )
+    # Debug Console moved to top
+    # Debug Console Rendered at Bottom
+    debug_group.render()
+
 
     gr.Markdown(f"---\n**PPPRPP {VERSION}** | Developed by Keisuke Igarashi | [GitHub Repository](https://github.com/igarashi309/PPPRPP_webUI)")
 
@@ -1430,4 +1665,6 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
 if __name__ == "__main__":
     cleanup_temp_files()
     # Enable queue for long-running tasks and launch
-    demo.queue().launch(share=False, inbrowser=True)
+    # Enable queue for long-running tasks and launch
+    # Pass custom_css here
+    demo.queue().launch(share=False, inbrowser=True, css=custom_css)

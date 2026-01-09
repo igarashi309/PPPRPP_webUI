@@ -28,10 +28,9 @@ def generate_gap_variations(motif_labels, ppr_scores, min_front, min_back, max_g
     """
     gap_variations = [(motif_labels, ppr_scores, 0, 0)]  # GAP 0, Pos 0
 
-    
     # Optimization: User requested ONLY Gap 0 and Gap N (target).
-    # Skip intermediate gaps (1..N-1) to save time.
-    target_gaps = [max_gap] if max_gap > 0 else []
+    # Skip intermediate gaps (1..N-1) to save time, as confirmed by User.
+    target_gaps = [int(max_gap)] if max_gap > 0 else []
     
     for gap_size in target_gaps:
         for front_size in range(min_front, len(motif_labels) - min_back + 1):
@@ -212,226 +211,237 @@ def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_v
     Processes FASTA sequence with given variations.
     Optimized to use NumPy.
     """
-    all_scores = []
+    all_scores = {
+        "Position_Relative": [],
+        "PPR_Binding_Score": [],
+        "PPR_Name": [],
+        "Motif_Labels": [],
+        "Motif_Labels_GAP": [],
+        "Gap_Size": [],
+        "Gap_Index": [],
+        "Segment": [],
+        "PPR_Motif_Scores": [],
+        "Total_Score": [],
+        "PPR_Binding_Scores_List": [],
+        "Predicted PPR Motif Scores List": [],
+        "Motif_Confidence_Scores": []
+    }
+    
     rna_seq = dna_to_rna(fasta_sequence)
-
-    for motif_labels, ppr_scores, gap_size, gap_pos in motif_labels_variations:
-        # Use NumPy calculation
-        total_scores, windows, score_matrix = calculate_binding_score_numpy(rna_seq, motif_binding_scores, motif_labels, ppr_scores)
+    seq_len = len(rna_seq)
+    
+    # Pre-calculate Total Scores for ALL variations
+    # Result: list of (total_scores_array, variation_obj)
+    variation_results = []
+    
+    for v_idx, variation in enumerate(motif_labels_variations):
+        motif_labels, ppr_scores_original, gap_size, gap_pos = variation
         
-        motif_labels_gap = ','.join(motif_labels)
+        # Adjust ppr_scores for calculation based on use_ps_score
+        ppr_scores_for_calc = ppr_scores_original
+        if not use_ps_score:
+            # If not using PS scores, treat all confidence scores as 1.0 for the binding score calculation
+            ppr_scores_for_calc = [1.0] * len(motif_labels)
+
+        # Use NumPy calculation
+        # We only need total_scores first to find the best variation
+        total_scores, windows, score_matrix = calculate_binding_score_numpy(rna_seq, motif_binding_scores, motif_labels, ppr_scores_for_calc)
+        
+        # total_scores length might vary if window size varies (Gap 0 vs Gap 5)
+        # But for 'scan', results are aligned to start position?
+        # sliding_window_view returns N - M + 1 windows.
+        # If M varies (Gap 0 len 30 vs Gap 5 len 35), result length differs by 5.
+        # This makes alignment tricky.
+        # We need to align by "Position_Relative" which is index in sequence.
+        # A hit at pos 10 means the motif starts at 10.
+        # If L=30, it covers 10-39. If L=35, it covers 10-44.
+        # But both are "at pos 10".
+        # So we should pad/truncate to match sequence length?
+        # Or just handle the common overlap.
+        # The number of valid windows is `seq_len - motif_length + 1`.
+        # Max valid index is `seq_len - motif_length`.
+        # So Gap 0 (shorter) has MORE valid positions than Gap 5 (longer).
+        # We can only compare positions valid for BOTH (or ALL).
+        # i.e., up to `seq_len - max_len`.
+        
+        variation_results.append({
+            "total_scores": total_scores,
+            "windows": windows,
+            "score_matrix": score_matrix,
+            "variation": variation, # Store original variation tuple
+            "motif_len": len(motif_labels)
+        })
+
+    if not variation_results:
+        return all_scores
+
+    # Aggregation: Return ALL variations instead of just the best one.
+    # We append results from each variation sequentially.
+    
+    # Initialize output lists (accumulators)
+    out_pos = []
+    out_ppr_name = []
+    out_motif_labels = []
+    out_motif_labels_gap = []
+    out_gap_size = []
+    out_gap_index = []
+    out_segment = []
+    out_ppr_motif_scores = []
+    out_total_score = []
+    out_binding_scores_list = []
+    out_pred_scores_list = []
+    out_conf_scores = []
+    
+    # Re-verify scoring method for correct binding score output
+    # If no_ps, total_score logic differs? 
+    # Logic: PPR_Binding_Score column is used by UI.
+    # If use_ps_score=True, Matrix includes confidence. total_scores is Weighted.
+    # If use_ps_score=False, Matrix uses 1.0 confidence. total_scores is Unweighted.
+    # So `res["total_scores"]` is strictly what we want for "PPR_Binding_Score" column in both cases?
+    # Wait, existing code had a check at line 424 to Re-sum?
+    # Ah, if use_ps_score=False, `ppr_scores_for_calc` was set to all 1s.
+    # So `total_scores` IS the unweighted sum. 
+    # So we don't need to re-sum manually if we trust the loop logic. 
+    # But let's check: "PPR_Binding_Score: score if use_ps_score else float(np.sum(base_scores_vec))" in analyze_single_site.
+    # In `process_fasta_sequences`:
+    # Line 245: if not use_ps_score: ppr_scores_for_calc = [1.0]...
+    # Line 249: calculate...
+    # So `total_scores` ALREADY follows the rule.
+    # Why did line 424 exists? "Handle Total Score override if no_ps".
+    # It recalculated `ppr_binding_score_col` from `out_binding_scores_list`.
+    # `out_binding_scores_list` came from `base_score_matrix` (unweighted).
+    # `score_matrix` (used for total_scores) was `base * ppr_scores_for_calc`.
+    # If no_ps, `ppr_scores_for_calc` is 1s. So `score_matrix` == `base_score_matrix`.
+    # So `total_scores` == `sum(binding_scores_list)`.
+    # So the re-calculation was redundant (or verification). 
+    # I will rely on `total_scores`.
+    
+    for v_idx, res in enumerate(variation_results):
+        scores = res["total_scores"]
+        num_sites = len(scores)
+        
+        if num_sites == 0:
+            continue
+            
+        vars_tuple = res["variation"]
+        motif_labels, ppr_scores_original, gap_size, gap_pos = vars_tuple
+        windows = res["windows"]
+        score_matrix = res["score_matrix"]
+        
+        # Constant strings
+        m_labels_str = ','.join(motif_labels)
+        
+        # Extend constant columns
+        out_pos.extend(range(num_sites))
+        out_ppr_name.extend([ppr_name] * num_sites)
+        out_motif_labels.extend([m_labels_str] * num_sites)
+        out_motif_labels_gap.extend([m_labels_str] * num_sites)
+        out_gap_size.extend([gap_size] * num_sites)
+        out_gap_index.extend([gap_pos] * num_sites)
+        out_pred_scores_list.extend([predicted_scores] * num_sites)
+        out_conf_scores.extend([ppr_scores_original] * num_sites)
+        out_total_score.extend(scores.tolist())
+        
+        # Complex columns Loop
+        # We need to compute Segment and Detail Scores for each site.
+        # This is the performance bottleneck.
         motif_length = len(motif_labels)
         
-        # We need to reconstruct the detailed info for the output
-        # But doing it for ALL positions is too slow.
-        # Does the app really need 'scores' (list of individual motif scores) and 'motif_binding_score_list' for EVERY position?
-        # The CSV output includes them.
-        # If we want to support 500kb+, we should probably NOT save lists in CSV for every row.
-        # But to keep compatibility, we might have to.
+        # 1. Segments
+        # Vectorized segment extraction is hard in strings. List comp is fast enough.
+        # rna_seq is string.
+        # segments = [rna_seq[i : i + motif_length] for i in range(num_sites)]
+        out_segment.extend([rna_seq[i : i + motif_length] for i in range(num_sites)])
         
-        # However, we can optimize the loop.
-        # Or better, we can filter? No, user wants "scan".
+        # 2. Detailed Scores
+        # score_matrix (M, 5). windows (N, M).
+        # We want to extract [M] scores for each N.
+        # Using fancy indexing for bulk extraction:
+        # result shape (N, M).
+        # We need to iterate M columns of windows?
+        # Re-using logic from calculate_binding_score_numpy or simply iterate?
+        # To get list of lists [[s1, s2...], [s1, s2...]], iteration is unavoidable for storage.
         
-        # Let's iterate and construct. It will still be faster than pure Python calculation + construction.
-        # But constructing 500k strings/lists is the bottleneck.
-        
-        # Maybe we can return a generator?
-        # Or just use the total_scores for the plot and only generate details on demand?
-        # The `app.py` expects a list of lists/tuples to create a DataFrame.
-        
-        # Let's try to be as fast as possible in construction.
-        
-        # Pre-calculate motif_binding_score_list (base scores)?
-        # It depends on the sequence.
-        
-        # Optimization:
-        # The return format is:
-        # (pos, ppr_binding_score, ppr_name, motif_labels, motif_labels_gap, gap_size, segment, ppr_motif_scores, total_score, motif_binding_score_list, predicted_scores, ppr_scores, gap_pos)
-        
-        # Most of these are constant or simple.
-        # segment, ppr_motif_scores, motif_binding_score_list vary.
-        
-        # If we just return the data needed for the DataFrame:
-        # Position, Score, ...
-        
-        # Let's iterate efficiently.
-        num_sites = len(total_scores)
-        
-        # Pre-convert constant lists to strings/lists to avoid re-creation if possible?
-        # predicted_scores is constant.
-        
-        # To speed up, we can avoid creating the detailed lists unless necessary.
-        # But the CSV writer expects them.
-        
-        # Let's just implement the loop. It will be faster than before because score calc is done.
-        
-        # We need to reconstruct individual scores for the output lists.
-        # score_matrix (M, 5)
-        # windows (N, M) -> indices 0-4
-        
-        # We can compute all individual scores at once?
-        # individual_scores = score_matrix[np.arange(M), windows] -> (N, M)
-        # This gives the score for each motif at each position.
-        
-        # Create indices for broadcasting
-        # M = motif_length
-        # windows is (N, M)
-        # We want to lookup score_matrix[j, windows[i, j]]
-        
-        # individual_scores = np.take_along_axis(score_matrix, windows, axis=None?) No.
-        
-        # individual_scores = np.zeros((num_sites, motif_length), dtype=np.float32)
-        # for j in range(motif_length):
-        #     individual_scores[:, j] = score_matrix[j, windows[:, j]]
-            
-        # This `individual_scores` corresponds to `scores` in original code.
-        # `motif_binding_score_list` is similar but without `ppr_scores` multiplication.
-        # We can reconstruct it: individual_scores / ppr_scores[j] ?
-        # Or just re-lookup from a base_score_matrix.
-        
-        # Let's create base_score_matrix
+        # Reconstruction of base_score_matrix (Unweighted) for display
         base_score_matrix = np.zeros((motif_length, 5), dtype=np.float32)
         for i, motif in enumerate(motif_labels):
-            if motif == "--":
-                 pass
-            elif motif in motif_binding_scores:
-                base_score_matrix[i, :4] = motif_binding_scores[motif]
-            else:
-                base_score_matrix[i, :4] = 0.25
+            if motif == "--": pass
+            elif motif in motif_binding_scores: base_score_matrix[i, :4] = motif_binding_scores[motif]
+            else: base_score_matrix[i, :4] = 0.25
             base_score_matrix[i, 4] = 0.25 if motif != "--" else 0
             
-        # Compute all individual scores (N x M)
-        # This might be memory intensive for 500k x 35 ~ 17.5M floats ~ 70MB. Acceptable.
+        # Get all scores at once?
+        # windows is (N, M). 
+        # We want to map each element of windows to a score from base_score_matrix.
+        # base_score_matrix has shape (M, 5). 
+        # Element at windows[i, j] (nucleotide index) corresponds to motif pos j.
+        # So we want score = base_score_matrix[j, windows[i, j]].
         
-        all_scores_matrix = np.zeros((num_sites, motif_length), dtype=np.float32)
-        all_base_scores_matrix = np.zeros((num_sites, motif_length), dtype=np.float32)
+        # This can be done via `np.take_along_axis`? No, broadcasting.
+        # scores_block = base_score_matrix[np.arange(motif_length), windows] -> No.
         
+        # Correct bulk indexing:
+        # We iterate cols j=0..M-1.
+        # For col j, we take base_score_matrix[j, windows[:, j]].
+        # This gives a column of scores (length N).
+        # We stack them to get (N, M).
+        
+        list_of_score_cols = []
         for j in range(motif_length):
             col_indices = windows[:, j]
-            all_scores_matrix[:, j] = score_matrix[j, col_indices]
-            all_base_scores_matrix[:, j] = base_score_matrix[j, col_indices]
+            scores_col = base_score_matrix[j, col_indices]
+            list_of_score_cols.append(scores_col)
             
-        # ppr_motif_scores = base_scores * predicted_scores
-        # predicted_scores is list of length M?
-        # If predicted_scores is empty (default), then ppr_motif_scores is empty?
-        # Original code: [b * p for b, p in zip(motif_binding_score_list, predicted_scores)]
-        # If predicted_scores is empty, result is empty.
+        # Stack columns to get (N, M)
+        # scores_n_m = np.column_stack(list_of_score_cols) # Shape (N, M)
+        scores_n_m = np.stack(list_of_score_cols, axis=1)
         
-        has_predicted = len(predicted_scores) > 0
-        if has_predicted:
-            # Handle length mismatch if gaps
-            # If gap, predicted_scores might need adjustment?
-            # Original code just zips, so it truncates.
-            # We replicate that.
-            limit = min(motif_length, len(predicted_scores))
-            pred_array = np.array(predicted_scores[:limit], dtype=np.float32)
-            # We only multiply up to limit
-            # ppr_motif_scores_matrix = all_base_scores_matrix[:, :limit] * pred_array
-            pass
-            
-        # Construct the columnar data
-        # To make it fast, we avoid creating objects for every row if possible.
+        # Convert to list of lists
+        out_binding_scores_list.extend(scores_n_m.tolist())
         
-        # Constant columns
-        # PPR_Name, Motif_Labels, Motif_Labels_GAP, Gap_Size, Predicted_Scores, PPR_Scores
-        # These are same for all rows in this variation.
+        # Pred scores / Confidence used for Weighting
+        # We prefer `ppr_scores_original` from the variation if meaningful, 
+        # or `predicted_scores` passed in (often None/Empty in unified analysis if handled by object).
+        # Actually `ppr_scores_original` IS the source of truth for this variation.
         
-        # We can use numpy repeat/tile if we want arrays, or just lists.
-        # Since we are returning to Python, lists might be okay if we don't iterate.
-        # But creating a list of 500k identical strings is still memory/time.
-        # Pandas handles scalar expansion if we pass a single value? 
-        # No, we are concatenating multiple variations (gap sizes).
-        # So we must expand them to match num_sites.
+        vector_for_weighting = np.array(ppr_scores_original, dtype=np.float32)
         
-        # Let's create lists efficiently.
-        # [value] * num_sites is fast.
+        # If predicted_scores is passed explicitly, it might override? 
+        # But `ppr_scores_original` comes FROM `motif_data` which comes FROM `ppr_finder`.
+        # So `ppr_scores_original` is correct.
         
-        ppr_name_col = [ppr_name] * num_sites
-        motif_labels_col = [','.join(motif_labels)] * num_sites
-        motif_labels_gap_col = [motif_labels_gap] * num_sites
-        gap_size_col = [gap_size] * num_sites
-        gap_pos_col = [gap_pos] * num_sites
-        predicted_scores_col = [predicted_scores] * num_sites
-        ppr_scores_col = [ppr_scores] * num_sites
-        
-        # Variable columns
-        # Position: 0..num_sites-1
-        pos_col = list(range(num_sites))
-        
-        # PPR_Binding_Score (Total Score)
-        # total_scores is numpy array.
-        ppr_binding_score_col = total_scores.tolist()
-        total_score_col = ppr_binding_score_col # Same
-        
-        if not use_ps_score:
-             # Recompute total if needed (sum of base scores)
-             # all_base_scores_matrix sum along axis 1
-             ppr_binding_score_col = np.sum(all_base_scores_matrix, axis=1).tolist()
-             total_score_col = ppr_binding_score_col
+        # Check alignment
+        if len(vector_for_weighting) == motif_length:
+             # Broadcast multiply: (N, M) * (M,)
+             # We need to reshape vector to (1, M) to broadcast across N rows?
+             # scores_n_m is (N, M). vector is (M,).
+             # NumPy broadcasts last dimension automatically.
              
-        # Segment
-        # This is the slow part: creating 500k substrings.
-        # But we can't avoid it if the user needs to see the sequence.
-        # List comprehension is fastest way in Python.
-        segment_col = [rna_seq[i:i+motif_length] for i in range(num_sites)]
-        
-        # PPR_Motif_Scores (List of floats)
-        # This is also slow: creating 500k lists.
-        # all_scores_matrix is (N, M).
-        # We want list of lists.
-        # all_scores_matrix.tolist() is optimized in C.
-        # But we need to handle predicted_scores multiplication if present.
-        
-        if has_predicted:
-            limit = min(motif_length, len(predicted_scores))
-            # Multiply relevant columns
-            # We need to use base scores for this multiplication
-            weighted_scores = all_base_scores_matrix[:, :limit] * np.array(predicted_scores[:limit], dtype=np.float32)
-            # We need to append the rest of the scores (if any) or just return weighted?
-            # Original logic: zip(motif_binding_score_list, predicted_scores)
-            # So result length is min(len(motifs), len(predicted)).
-            ppr_motif_scores_col = weighted_scores.tolist()
+             weighted_nm = scores_n_m * vector_for_weighting
+             out_ppr_motif_scores.extend(weighted_nm.tolist())
         else:
-            ppr_motif_scores_col = [[]] * num_sites
-            
-        # PPR_Binding_Scores_List (Base scores)
-        motif_binding_score_list_col = all_base_scores_matrix.tolist()
-        
-        # Append to main lists
-        # We are aggregating across variations (gap sizes).
-        # So we extend the lists.
-        
-        if not all_scores:
-            # Initialize dict
-            all_scores = {
-                "Position_Relative": [],
-                "PPR_Binding_Score": [],
-                "PPR_Name": [],
-                "Motif_Labels": [],
-                "Motif_Labels_GAP": [],
-                "Gap_Size": [],
-                "Segment": [],
-                "PPR_Motif_Scores": [],
-                "Total_Score": [],
-                "PPR_Binding_Scores_List": [],
-                "Predicted PPR Motif Scores List": [],
-                "Motif_Confidence_Scores": [],
-                "Gap_Index": [] # Add new column
-            }
-            
-        all_scores["Position_Relative"].extend(pos_col)
-        all_scores["PPR_Binding_Score"].extend(ppr_binding_score_col)
-        all_scores["PPR_Name"].extend(ppr_name_col)
-        all_scores["Motif_Labels"].extend(motif_labels_col)
-        all_scores["Motif_Labels_GAP"].extend(motif_labels_gap_col)
-        all_scores["Gap_Size"].extend(gap_size_col)
-        all_scores["Segment"].extend(segment_col)
-        all_scores["PPR_Motif_Scores"].extend(ppr_motif_scores_col)
-        all_scores["Total_Score"].extend(total_score_col)
-        all_scores["PPR_Binding_Scores_List"].extend(motif_binding_score_list_col)
-        all_scores["Predicted PPR Motif Scores List"].extend(predicted_scores_col)
-        all_scores["Motif_Confidence_Scores"].extend(ppr_scores_col)
-        all_scores["Gap_Index"].extend(gap_pos_col)
+             # Mismatch length (rare/shouldn't happen for valid variation)
+             # Fallback to unweighted or empty?
+             # Try unweighted but log warning?
+             out_ppr_motif_scores.extend(scores_n_m.tolist()) 
+             
+        # Maintain predicted_scores column just in case (though likely empty list)
+        out_pred_scores_list.extend([predicted_scores] * num_sites)
+    
+    # Assembly
+    all_scores["Position_Relative"] = out_pos
+    all_scores["PPR_Name"] = out_ppr_name
+    all_scores["Motif_Labels"] = out_motif_labels
+    all_scores["Motif_Labels_GAP"] = out_motif_labels_gap
+    all_scores["Gap_Size"] = out_gap_size
+    all_scores["Gap_Index"] = out_gap_index
+    all_scores["Segment"] = out_segment
+    all_scores["PPR_Motif_Scores"] = out_ppr_motif_scores
+    all_scores["Total_Score"] = out_total_score
+    all_scores["PPR_Binding_Scores_List"] = out_binding_scores_list
+    all_scores["Predicted PPR Motif Scores List"] = out_pred_scores_list
+    all_scores["Motif_Confidence_Scores"] = out_conf_scores
+    all_scores["PPR_Binding_Score"] = out_total_score
 
     return all_scores
 
@@ -466,4 +476,105 @@ def analyze_ppr_data(motif_data, fasta_sequence, min_front, min_back, max_gap, p
         'yan_gap_no_ps': process_fasta_sequences(fasta_sequence, YAN_BINDING_SCORES, gap_variations, ppr_name, predicted_scores, use_ps_score=False)
     }
     return scores
+
+def analyze_single_site(motif_data, rna_seq, site_pos, min_front, min_back, max_gap, predicted_scores, use_ps_score, method):
+    """
+    Analyzes a single genomic site for all gap variations.
+    Used for "Detail Inspector" to show alternative alignments.
+    """
+    import pandas as pd
+    import numpy as np
+
+    # Determine scoring table
+    if method == 'kobayashi':
+         motif_binding_scores = KOBAYASHI_BINDING_SCORES
+    else:
+         motif_binding_scores = YAN_BINDING_SCORES
+         
+    # Generate variations
+    variations = generate_gap_variations(motif_data['motif_labels'], motif_data['ppr_scores'], min_front, min_back, max_gap)
+    
+    results = []
+    
+    # Adjust ppr_scores based on use_ps_score
+    ppr_scores_for_calc = motif_data['ppr_scores']
+    if not use_ps_score:
+        ppr_scores_for_calc = [1.0] * len(motif_data['motif_labels'])
+        
+    # Re-generate variations with correct calc scores
+    calc_variations = generate_gap_variations(motif_data['motif_labels'], ppr_scores_for_calc, min_front, min_back, max_gap)
+    
+    seq_len = len(rna_seq)
+    
+    # Iterate both lists (they are aligned)
+    for (v_orig, v_calc) in zip(variations, calc_variations):
+        # v_orig: (labels, original_scores, gap_size, front_size)
+        # v_calc: (labels, calc_scores, gap_size, front_size)
+        
+        m_labels = v_calc[0]
+        m_scores_calc = v_calc[1]
+        gap_size = v_calc[2]
+        front_size = v_calc[3] # Index of gap start
+        
+        motif_len = len(m_labels)
+        
+        # Check bounds
+        if site_pos < 0 or site_pos + motif_len > seq_len:
+            continue
+            
+        # Extract sub-sequence
+        sub_seq = rna_seq[site_pos : site_pos + motif_len]
+        
+        # Calculate score for this single window
+        # calculate_binding_score_numpy takes seq.
+        total_scores, windows, score_matrix = calculate_binding_score_numpy(sub_seq, motif_binding_scores, m_labels, m_scores_calc)
+        
+        if len(total_scores) == 0:
+            continue
+            
+        score = float(total_scores[0])
+        
+        # Base scores for detail display
+        base_score_matrix = np.zeros((motif_len, 5), dtype=np.float32)
+        for i, motif in enumerate(m_labels):
+            if motif == "--": pass
+            elif motif in motif_binding_scores: base_score_matrix[i, :4] = motif_binding_scores[motif]
+            else: base_score_matrix[i, :4] = 0.25
+            base_score_matrix[i, 4] = 0.25 if motif != "--" else 0
+            
+        # Get indices for this window (windows[0])
+        col_indices = windows[0]
+        seq_range = np.arange(motif_len)
+        
+        base_scores_vec = base_score_matrix[seq_range, col_indices]
+        
+        # Original confidence scores (for display)
+        conf_scores_gap = v_orig[1]
+        
+        # Predicted scores (placeholder/basic logic)
+        pred_scores_list = predicted_scores if predicted_scores else []
+        ppr_motif_scores = [] 
+        if pred_scores_list:
+             limit = min(motif_len, len(pred_scores_list))
+             weighted = base_scores_vec[:limit] * np.array(pred_scores_list[:limit], dtype=np.float32)
+             ppr_motif_scores = weighted.tolist()
+             
+        # Gap Index in dataframe terminology (position of gap in motif)
+        # Is Gap_Index used for anything? Logic says "Gap_Index" is front_size.
+        
+        row = {
+            "Gap_Index": front_size,
+            "Gap_Size": gap_size,
+            "Total_Score": score, # Weighted if use_ps_score
+            "PPR_Binding_Score": score if use_ps_score else float(np.sum(base_scores_vec)),
+            "Motif_Labels_GAP": ','.join(m_labels),
+            "Segment": sub_seq,
+            "PPR_Binding_Scores_List": base_scores_vec.tolist(),
+            "Motif_Confidence_Scores": conf_scores_gap,
+            "PPR_Motif_Scores": ppr_motif_scores,
+            "Predicted PPR Motif Scores List": pred_scores_list
+        }
+        results.append(row)
+        
+    return pd.DataFrame(results)
 
