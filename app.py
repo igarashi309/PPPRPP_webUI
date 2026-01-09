@@ -60,13 +60,13 @@ def list_past_results():
 
 def load_result(filename):
     """Loads a past result CSV and updates the UI."""
-    # Output signature: status_msg, csv_path, fig, fig_detail, df_state, motif_df, motif_fig
+    # Output signature: status, csv, browser, motif_plot, motif_table, range_plot, df_state
     if not filename:
-        return "No file selected.", None, go.Figure(), go.Figure(), None, pd.DataFrame(), go.Figure()
+        return "No file selected.", None, go.Figure(), go.Figure(), pd.DataFrame(), go.Figure(), None
     
     path = os.path.join(TMP_DIR, filename)
     if not os.path.exists(path):
-        return f"File not found: {filename}", None, go.Figure(), go.Figure(), None, pd.DataFrame(), go.Figure()
+        return f"File not found: {filename}", None, go.Figure(), go.Figure(), pd.DataFrame(), go.Figure(), None
         
     try:
         df = pd.read_csv(path)
@@ -77,9 +77,20 @@ def load_result(filename):
         
         fig = plot_genome_browser(df, seq_id=job_name, analysis_type=atype)
         
-        return f"Loaded result: {filename}", path, fig, go.Figure(), df, pd.DataFrame(), go.Figure()
+        # Try to find corresponding motif file
+        # Naming convention: {job}_results.csv -> {job}_motifs.txt
+        motif_path = path.replace("_results.csv", "_motifs.txt")
+        motif_fig = go.Figure()
+        motif_df = pd.DataFrame()
+        
+        if os.path.exists(motif_path):
+             # Extract simple title
+             motif_df, motif_fig = visualize_motifs(motif_path, analysis_title=f"{job_name} Motifs")
+        
+        return f"Loaded result: {filename}", path, fig, motif_fig, motif_df, go.Figure(), df
     except Exception as e:
-        return f"Error loading: {e}", None, go.Figure(), go.Figure(), None, pd.DataFrame(), go.Figure()
+        print(f"Error loading result: {e}")
+        return f"Error loading: {e}", None, go.Figure(), go.Figure(), pd.DataFrame(), go.Figure(), None
 
 def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name):
     # Construct analysis_type string
@@ -929,15 +940,15 @@ def update_detail_plot(evt: gr.SelectData, df):
 
 def show_manual_detail(manual_pos, manual_strand, df, analysis_context):
     if df is None or df.empty:
-        return gr.update(choices=[]), gr.update(value=None), go.Figure()
+        return gr.update(choices=[]), gr.update(value=None), go.Figure(), ""
 
     try:
         if not manual_pos:
-            return gr.update(choices=[]), gr.update(value=None), go.Figure()
+            return gr.update(choices=[]), gr.update(value=None), go.Figure(), ""
             
         target_pos = int(manual_pos)
     except ValueError:
-        return gr.update(choices=[]), gr.update(value=None), go.Figure()
+        return gr.update(choices=[]), gr.update(value=None), go.Figure(), ""
 
     # Determine if we have context to re-calculate (Dynamic Mode) or just DataFrame (Static Mode)
     use_dynamic = False
@@ -984,7 +995,7 @@ def show_manual_detail(manual_pos, manual_strand, df, analysis_context):
         target_data = subset.to_dict('records')
 
     if not target_data:
-        return gr.update(choices=[], value="No data"), None, go.Figure()
+        return gr.update(choices=[], value="No data"), None, go.Figure(), ""
 
     options = []
     data_map = {}
@@ -1268,7 +1279,9 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             
             # Result Management
             past_results = list_past_results()
-            result_selector = gr.Dropdown(label="Past Results", choices=past_results, value=None, interactive=True)
+            with gr.Row():
+                result_selector = gr.Dropdown(label="Past Results", choices=past_results, value=None, interactive=True, scale=4)
+                load_btn = gr.Button("Load Result", variant="secondary", scale=1)
             
             run_btn = gr.Button("Run Unified Analysis", variant="primary")
             
@@ -1328,20 +1341,9 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             ncbi_download = gr.File(label="Download CSV")
             
         with gr.Row():
-            # Renaming logic: result_selector was used in main tab.
-            # We defined `prev_results_dropdown` for main tab.
-            # We need a NEW selector for NCBI tab to avoid conflict?
-            # Or reuse `result_selector` variable name?
-            # The event binding loop used `result_selector` (from main tab?).
-            # Wait, main tab had `prev_results_dropdown`.
-            # I renamed it `result_selector` in the event binding code above?
-            # Let's check the event binding again.
-            # `result_selector.select`...
-            # The Main Tab definition logic (lines 900+) likely defined `prev_results_dropdown`.
-            # If I renamed the variable in `create_ui`, I must update valid references.
-            
-            # Let's create `ncbi_result_selector` here.
-            ncbi_result_selector = gr.Dropdown(label="Load Past Result (NCBI)", choices=[], interactive=True)
+            with gr.Row():
+                ncbi_result_selector = gr.Dropdown(label="Load Past Result (NCBI)", choices=[], interactive=True, scale=4)
+                ncbi_load_btn = gr.Button("Load Result", variant="secondary", scale=1)
             
             # Note: I need to update the event binding at the end of file to use `ncbi_result_selector` instead of `result_selector`
             # or add a NEW event for `ncbi_result_selector`.
@@ -1445,58 +1447,27 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
     
     # 5. Load Results logic (Main Tab)
     
-    result_selector.select( 
-        load_result,
-        inputs=[result_selector], 
-        outputs=[status_output, plot_browser, motif_plot, range_plot, df_state] 
-    )
-    
+
     # NCBI Range Browser Logic
     range_btn.click(
         on_range_click, 
         inputs=[ncbi_accession, range_start, range_end, ncbi_download, ncbi_gff_download, feature_types, plot_height], 
         outputs=[range_plot]
     )
-    
-    # NCBI Past Results Selector
-    # ... logic defined above in previous edit ...
-    
-    # We replaced lines 1467 to 1494.
-    # The previous block had `manual_btn.click` and `gap_select.change` (with WRONG inputs/outputs).
-    # And `result_selector.select` and `range_btn.click`.
-    # I am replacing them with CORRECTED versions.
 
+    # 5. Load Results logic (Main Tab & NCBI Tab)
     
-    # NCBI Past Results Selector
-    # Populating this: We need to link it to list_past_results.
-    # We can reuse the same list as prev_results_dropdown or have a separate one.
-    # A separate one in the NCBI tab is better UX.
+    # Common Output List
+    load_outputs = [status_output, csv_output, plot_browser, motif_plot, motif_table, range_plot, df_state]
     
-    # Define selector in NCBI tab (we need to find where it is)
-    # The replacement range here covers the end of the file.
-    # I should have added the component earlier in the layout definition.
-    # Since I can't jump back easily, I will just add the click handler here assuming I add the component in a separate edit.
-    # Wait, I must add the component to the layout FIRST.
-    # I will do that in a separate step.
+    # Main Tab
+    result_selector.select(load_result, inputs=[result_selector], outputs=load_outputs)
+    load_btn.click(load_result, inputs=[result_selector], outputs=load_outputs)
     
-    # NCBI Past Results Logic
-    def load_ncbi_result(filename):
-        if not filename:
-            return None
-        # Construct path (assumes in current dir)
-        # list_past_results returns "FileName"
-        # We need absolute path or relative?
-        # Gradio File component accepts path string.
-        filepath = os.path.abspath(filename)
-        if os.path.exists(filepath):
-            return filepath
-        return None
-
-    ncbi_result_selector.select(
-        load_ncbi_result,
-        inputs=[ncbi_result_selector],
-        outputs=[ncbi_download]
-    )
+    # NCBI Tab
+    # Use load_result to restore full analysis state even from NCBI tab
+    ncbi_result_selector.select(load_result, inputs=[ncbi_result_selector], outputs=load_outputs)
+    ncbi_load_btn.click(load_result, inputs=[ncbi_result_selector], outputs=load_outputs)
     
     # Populate dropdowns on load
     demo.load(list_past_results, outputs=[result_selector, ncbi_result_selector])
