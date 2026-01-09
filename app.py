@@ -438,7 +438,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     dd_main, dd_ncbi = list_past_results()
     
     # Outputs order: status, csv, motif_plot, browser_plot, range_plot, df_state, context, main_dd, ncbi_dd
-    return status_msg, csv_path, motif_fig, fig, go.Figure(), df_output, analysis_context, dd_main, dd_ncbi
+    return status_msg, csv_path, motif_fig, motif_df, fig, go.Figure(), df_output, analysis_context, dd_main, dd_ncbi
     
 def parse_analysis_type(atype_str):
     """Parses analysis_type string into readable format."""
@@ -1432,7 +1432,7 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             run_btn = gr.Button("Run Unified Analysis", variant="primary")
             
         with gr.Column():
-            status_output = gr.Textbox(label="Status")
+            status_output = gr.Textbox(label="Status", lines=15)
             
     # Outputs
     with gr.Row():
@@ -1571,7 +1571,7 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             tool_select, scoring_method, max_gap_size, use_ps_score, job_name_input
         ],
         outputs=[
-            status_output, csv_output, motif_plot, plot_browser, range_plot, df_state, analysis_context_state,
+            status_output, csv_output, motif_plot, motif_table, plot_browser, range_plot, df_state, analysis_context_state,
             result_selector, ncbi_result_selector
         ]
     )
