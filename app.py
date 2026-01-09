@@ -125,6 +125,15 @@ def load_csv_with_parsing(path):
         print(f"Error parsing CSV: {e}")
         return pd.DataFrame()
 
+def load_csv_optimized(path, usecols=None):
+    """Loads CSV with specific columns, skipping expensive list parsing."""
+    try:
+        df = pd.read_csv(path, usecols=usecols)
+        return df
+    except Exception as e:
+        print(f"Error loading optimized CSV: {e}")
+        return pd.DataFrame()
+
 def load_result(filename):
     """Loads a past result CSV and updates the UI."""
     # Output signature: status, csv, browser, motif_plot, motif_table, range_plot, df_state, analysis_context
@@ -162,7 +171,7 @@ def load_result(filename):
         print(f"Error loading result: {e}")
         return f"Error loading: {e}", None, go.Figure(), go.Figure(), pd.DataFrame(), go.Figure(), None, {}
 
-def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name):
+def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name, skip_plots=False):
     # Construct analysis_type string
     method_map = {"PLS-type": "kobayashi", "P-type": "yan"}
     method = method_map.get(scoring_method, scoring_method).lower()
@@ -179,7 +188,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
             protein_input = DEFAULT_PROTEIN
 
     if not protein_input:
-        return "Error: Please provide a protein sequence.", None, None, None, None, None
+        return "Error: Please provide a protein sequence.", None, None, None, None, None, None, None, None, None
 
     if not protein_input.strip().startswith(">"):
         protein_input = f">UserSequence\n{protein_input}"
@@ -1255,9 +1264,9 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
     
     try:
         # We need to adapt the return values
-        # Return: status_msg, csv_path, motif_fig, fig_browser, range_plot, df_output, analysis_context, dd_main, dd_ncbi
-        result_msg, csv_path, motif_fig, fig_browser, _, df, _, _, _ = run_unified_analysis(
-            protein_text, protein_file, rna_text, None, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name
+        # Return: status_msg, csv_path, motif_fig, motif_df, fig_browser, range_plot, df_output, analysis_context, dd_main, dd_ncbi
+        result_msg, csv_path, motif_fig, _, fig_browser, _, df, _, _, _ = run_unified_analysis(
+            protein_text, protein_file, rna_text, None, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name, skip_plots=True
         )
         log(f"Analysis result: {result_msg}")
         
@@ -1518,7 +1527,10 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             if not csv_file:
                 return go.Figure(layout=dict(title="No CSV file found. Run analysis first."))
             try:
-                df = load_csv_with_parsing(csv_file.name)
+                # Optimized load: only read necessary columns, skip parsing lists
+                cols = ['Genome_Position', 'PPR_Binding_Score', 'PPR_Name', 'Strand', 'Analysis_Type']
+                df = load_csv_optimized(csv_file.name, usecols=cols)
+                
                 # GFF file object or path?
                 gff_path = gff_file.name if gff_file else None
                 return plot_range_browser(df, gff_path, int(start), int(end), accession, features, int(height))
