@@ -26,7 +26,7 @@ os.makedirs(INPUT_DIR, exist_ok=True)
 
 TMP_DIR = OUTPUT_DIR
 
-VERSION = "v0.0.9"
+VERSION = "v0.1.0"
 
 def cleanup_temp_files():
     """Cleans up temporary files from previous runs."""
@@ -144,6 +144,180 @@ def load_csv_optimized(path, usecols=None):
     except Exception as e:
         print(f"Error loading optimized CSV: {e}")
         return pd.DataFrame()
+
+        return pd.DataFrame()
+
+def parse_motif_file_to_records(motifs_file, seq_id="Unknown"):
+    """
+    Parses a motifs.txt file and returns a list of Bio.SeqRecord objects 
+    compatible with the analysis core.
+    """
+    try:
+        import pandas as pd
+        from Bio.SeqRecord import SeqRecord
+        from Bio.Seq import Seq
+        
+        # Format: id, start, end, score, motif_seq, second, fifth, last, type
+        # No header
+        try:
+            df = pd.read_table(motifs_file, names=['id','start','end','score', 'motif_seq','second','fifth','last','type'], header=None)
+        except Exception:
+            # Try skipping header if it exists (some versions might have it)
+             df = pd.read_table(motifs_file, names=['id','start','end','score', 'motif_seq','second','fifth','last','type'], header=0)
+             
+        records = []
+        for _, row in df.iterrows():
+            # Create SeqRecord
+            # Note: The txt content for 'motif_seq' is the sequence
+            seq_obj = Seq(str(row['motif_seq']))
+            rec = SeqRecord(seq_obj, id=seq_id)
+            
+            # Annotations required by core.py
+            rec.annotations = {
+                "PPR_TYPE": row['type'],
+                "PS_SCORE": float(row['score']),
+                # Txt file has 1-based start? Usually yes for display.
+                # But let's check motif_generation.py parse_ps_scan_xml saving:
+                # d_start = p.annotations["PPR_STARTS"] + 1
+                # So here we subtract 1
+                "PPR_STARTS": int(row['start']) - 1,
+                "PPR_ENDS": int(row['end']), # End is usually inclusive in display? 
+                # In xml saving: d_end = p.annotations["PPR_ENDS"] (which was safe_end = exclusive index in python slicing?)
+                # Wait, motif_generation.py: safe_end = min(len, end)
+                # python slicing [start:end] -> end is exclusive.
+                # So PPR_ENDS in annotation was exclusive index.
+                # In txt saving: d_end = p.annotations["PPR_ENDS"]
+                # So txt end is exclusive index.
+                # So we use it as is.
+                "FIFTH_AA": str(row['fifth']),
+                "LAST_AA": str(row['last']),
+                "PPR_CODE": str(row['fifth']) + str(row['last'])
+            }
+            records.append(rec)
+            
+        return records
+    except Exception as e:
+        print(f"Error parsing motif file {motifs_file}: {e}")
+        return []
+
+        return []
+
+def reconstruct_context_from_csv(csv_path, fasta_path=None):
+    """
+    Attempts to reconstruct the analysis context (motifs, RNA, settings)
+    from the Result CSV filename and associated files.
+    """
+    try:
+        filename = os.path.basename(csv_path)
+        # Format: {JobName}_{Prot}_{RNA}_{Method}_{Gap}_{Score}_results.csv
+        # Example: my_analysis_PPR791_Rf1a__IR24_AP017386.1_P-type_Gap0_ScoreOff_results.csv
+        
+        parts = filename.replace("_results.csv", "").split('_')
+        
+        # We need to find specific tokens.
+        # Method: P-type or PLS-type
+        method = "yan" # Default
+        if "P-type" in parts: method = "yan"
+        elif "PLS-type" in parts: method = "kobayashi"
+        
+        # Gap
+        max_gap = 0
+        for p in parts:
+            if p.lower().startswith("gap"):
+                try:
+                    max_gap = int(p.lower().replace("gap", ""))
+                except: pass
+                
+        # Score
+        use_ps = True
+        if "ScoreOff" in parts: use_ps = False
+        
+        # Files
+        # Motif file: {Base}_motifs.txt
+        motif_path = csv_path.replace("_results.csv", "_motifs.txt")
+        if not os.path.exists(motif_path):
+            # Fallback: Check OUTPUT_DIR (TMP_DIR) in case we are in Gradio temp
+            fallback_path = os.path.join(TMP_DIR, os.path.basename(motif_path))
+            if os.path.exists(fallback_path):
+                motif_path = fallback_path
+            else:
+                print(f"Motif file not found: {motif_path} or {fallback_path}")
+                return {}
+            
+        records = parse_motif_file_to_records(motif_path)
+        if not records:
+            print("Failed to parse motif data")
+            return {}
+            
+        # Convert List[SeqRecord] to Dict format ('motif_labels', 'ppr_scores') expected by core
+        motif_labels = [r.annotations.get('PPR_CODE') for r in records]
+        ppr_scores = [r.annotations.get('PS_SCORE') for r in records]
+        motif_data = {'motif_labels': motif_labels, 'ppr_scores': ppr_scores}
+            
+        # RNA / Genome
+        # Try to find RNA ID. It's properly hard to split by underscore if ID has underscores.
+        # But we know method/gap/score are at the end.
+        # And we check if the Accession exists in data/output or input
+        
+        # Heuristic: List .fasta files in output/input and see if any is a substring of filename?
+        # Or parse standard accessions.
+        # Accession usually: AP017386.1 -> "AP017386.1"
+        
+        rna_seq = ""
+        
+        # Check output directory for FASTAs
+        candidates = glob.glob(os.path.join(TMP_DIR, "*.fasta")) + glob.glob(os.path.join(INPUT_DIR, "*.fasta"))
+        best_cand = None
+        
+        for cand in candidates:
+            # Check if basename of cand (minus extension) is in our result filename
+            cand_name = os.path.splitext(os.path.basename(cand))[0]
+            if cand_name in filename:
+                best_cand = cand
+                break
+                
+        if best_cand:
+            try:
+                with open(best_cand, "r") as f:
+                    # It's a FASTA, so skip header
+                    lines = f.readlines()
+                    seq_lines = [l.strip() for l in lines if not l.startswith(">")]
+                    rna_seq = "".join(seq_lines)
+            except: pass
+        
+        # Override with explicit FASTA if provided
+        if fasta_path and os.path.exists(fasta_path):
+             try:
+                with open(fasta_path, "r") as f:
+                    lines = f.readlines()
+                    seq_lines = [l.strip() for l in lines if not l.startswith(">")]
+                    rna_seq = "".join(seq_lines)
+                    # Normalize
+                    rna_seq = core.dna_to_rna(rna_seq)
+             except Exception as e:
+                 print(f"Error reading explicit FASTA {fasta_path}: {e}")
+
+        if not rna_seq:
+            print("Could not locate or read RNA FASTA for context reconstruction.")
+            return {}
+            
+        # Construct Context
+        context = {
+            'motif_data': motif_data,
+            'rna_seq': rna_seq,
+            'min_front': 1,
+            'min_back': 1,
+            'max_gap': max_gap,
+            'predicted_scores': [], # Can't easily reconstruct if used, but usually empty for basic runs
+            'use_ps_score': use_ps,
+            'method': method,
+            'ppr_name': "Reconstructed" # Display name
+        }
+        return context
+        
+    except Exception as e:
+        print(f"Error reconstructing context: {e}")
+        return {}
 
 def load_single_site_optimized(path, target_pos, target_strand):
     """Loads a single row matching Position and Strand, parsing list columns."""
@@ -272,6 +446,9 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     else:
         sequence = rna_input.strip()
 
+    # User Request: Normalize to RNA (T->U, Uppercase)
+    sequence = core.dna_to_rna(sequence)
+
     # 3. Run Discovery
     with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix=".fasta") as tmp_fasta:
         tmp_fasta.write(protein_input)
@@ -368,9 +545,17 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     
     predicted_scores = [] # Default empty
     
+    # Target Analysis Config for Optimization
+    target_analysis_config = {
+        'method': method, # 'yan' or 'kobayashi'
+        'use_ps': use_ps_score,
+        'gap_mode': 'varied' if max_gap > 0 else 'gap0'
+    }
+
     try:
         # Forward
-        scores_fwd = core.analyze_ppr_data(motif_data, rna_seq, min_front, min_back, max_gap, predicted_scores, ppr_name)
+        # Use Lite Mode + Targeted Analysis
+        scores_fwd = core.analyze_ppr_data(motif_data, rna_seq, min_front, min_back, max_gap, predicted_scores, ppr_name, detailed_output=False, target_analysis=target_analysis_config)
         if lookup_key in scores_fwd:
             fwd_data = scores_fwd[lookup_key]
             # Extend all_scores with fwd_data (Dict)
@@ -385,7 +570,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
         
         # Reverse
         rev_seq = core.get_reverse_complement(rna_seq)
-        scores_rev = core.analyze_ppr_data(motif_data, rev_seq, min_front, min_back, max_gap, predicted_scores, ppr_name)
+        scores_rev = core.analyze_ppr_data(motif_data, rev_seq, min_front, min_back, max_gap, predicted_scores, ppr_name, detailed_output=False, target_analysis=target_analysis_config)
         if lookup_key in scores_rev:
             rev_data = scores_rev[lookup_key]
             # Extend all_scores with rev_data (Dict)
@@ -474,6 +659,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     df_output.to_csv(csv_path, index=False)
     
     # Save accompanying motifs file for Load Result
+    # Save accompanying motifs file for Load Result
     if motifs_file and os.path.exists(motifs_file):
         # Naming convention matches load_result expectation: {job}_motifs.txt
         # final_job_name ends with _results
@@ -481,8 +667,11 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
         dest_motifs = os.path.join(TMP_DIR, motifs_dest_name)
         try:
             shutil.copy2(motifs_file, dest_motifs)
+            print(f"DEBUG: Copied motifs from {motifs_file} to {dest_motifs}")
         except Exception as e:
             print(f"Warning: Failed to save motifs file: {e}")
+    else:
+        print(f"DEBUG: Motifs file missing or invalid. Source: {motifs_file}")
 
     # 5. Visualization (Genome Browser)
     fig = go.Figure()
@@ -807,9 +996,6 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
         margin=dict(t=80, b=50, l=50, r=50)
     )
             
-    fig.update_xaxes(title_text="Genomic Position", row=3, col=1)
-    fig.update_yaxes(title_text="Fwd Score", row=1, col=1, range=[0, y_limit])
-    fig.update_yaxes(title_text="Annotations", row=2, col=1, showticklabels=False, range=[-1, 1])
     fig.update_yaxes(title_text="Rev Score", row=3, col=1, range=[0, y_limit], autorange="reversed")
     
     return fig
@@ -1010,12 +1196,21 @@ def visualize_single_site(row):
             logs.append("  PPR_Motif_Scores empty. Falling back to PPR_Binding_Scores_List.")
             scores = parse_list_col(row.get('PPR_Binding_Scores_List'), 'PPR_Binding_Scores_List')
             
-        # Parse motif labels (handle string vs list)
+        # Parse motif labels (handle string vs list vs nan)
         m_gap = row.get('Motif_Labels_GAP', '')
-        motif_labels = m_gap.split(',') if isinstance(m_gap, str) else m_gap
+        if isinstance(m_gap, str):
+             motif_labels = m_gap.split(',')
+        elif isinstance(m_gap, list):
+             motif_labels = m_gap
+        else:
+             # Handle NaN or other types
+             motif_labels = []
+        
         logs.append(f"  Motif Labels (len={len(motif_labels)}): {motif_labels}")
         
         segment = row.get('Segment', '')
+        # Display as RNA (U)
+        segment = core.dna_to_rna(segment)
         total_score = row.get('Total_Score', 0)
         logs.append(f"  Total Score: {total_score}")
         
@@ -1255,6 +1450,31 @@ def show_manual_detail(manual_pos, manual_strand, df, analysis_context):
         logs.append(f"Searching DF with shape {df.shape}")
         mask = (df['Genome_Position'] == target_pos) & (df['Strand'] == manual_strand)
         subset = df[mask]
+        
+        # CHECK IF LITE MODE (Missing detailed columns)
+        required_cols = ['PPR_Binding_Scores_List', 'Segment', 'PPR_Motif_Scores']
+        missing_cols = [c for c in required_cols if c not in subset.columns]
+        
+        if missing_cols:
+            logs.append(f"WARNING: Lite Mode Detected! Missing columns: {missing_cols}")
+            logs.append("Detail Inspector requires these columns or Dynamic Context.")
+            logs.append("Attempting to force Dynamic Mode if context was not provided...")
+            
+            # If context is empty, we can't do anything.
+            # But the caller (on_ncbi_detail_click) calls reconstruct_context_from_csv.
+            # So context should be available.
+            # If we reached here, it means context was None/Empty?
+            if not analysis_context:
+                 logs.append("ERROR: Context is empty. Cannot reconstruct details from Lite CSV.")
+                 return gr.update(choices=[], value="Error: Detailed data missing and Context unavailable."), None, go.Figure(), "", "\n".join(logs)
+            else:
+                 # This branch shouldn't be reached if logic above (if analysis_context: use_dynamic=True) is correct.
+                 # Wait, logic above checks: if 'motif_data' in analysis_context...
+                 # If analysis_context exists but missing keys?
+                 logs.append("Context exists but might be malformed or `use_dynamic` logic failed.")
+                 # Force return error or try again?
+                 return gr.update(choices=[], value="Error: Lite CSV loaded but Dynamic Analysis failed."), None, go.Figure(), "", "\n".join(logs)
+                 
         target_data = subset.to_dict('records')
         logs.append(f"Found {len(target_data)} matching rows in DF.")
 
@@ -1281,15 +1501,21 @@ def show_manual_detail(manual_pos, manual_strand, df, analysis_context):
     logs.append(f"Default Selection: {default_val}")
     
     # Call visualize with unpacking
+    # Generate Plot for best result
     if default_val:
-        fig, log_txt = visualize_single_site(data_map[default_val])
-        logs.append("\n--- Visualization Logs ---")
+        fig, log_txt = visualize_single_site(data_map.get(default_val))
         logs.append(log_txt)
     else:
-         fig, log_txt = go.Figure(), "No default val"
-         logs.append("No default val determined.")
+        fig, log_txt = go.Figure(), "No default value selected"
+        logs.append(log_txt)
     
-    return gr.update(choices=options, value=default_val), data_map, fig, data_map[default_val]['Segment'] if default_val else "", "\n".join(logs)
+    # Return matched sequence (as RNA)
+    seq_val = ""
+    if default_val:
+        seq_val = data_map[default_val].get('Segment', '')
+        seq_val = core.dna_to_rna(seq_val)
+    
+    return gr.update(choices=options, value=default_val), data_map, fig, seq_val, "\n".join(logs)
 
 def inspect_gap_select(selection_str, data_map):
     """Updates the plot based on the dropdown selection using cached data_map."""
@@ -1302,7 +1528,13 @@ def inspect_gap_select(selection_str, data_map):
             return go.Figure(layout=dict(title="Selection not found in data")), "", "Selection not found."
             
         fig, log_txt = visualize_single_site(row)
-        return fig, row['Segment'], log_txt
+        fig, log_txt = visualize_single_site(row)
+        
+        # Return Sequence as RNA (U)
+        segment = row.get('Segment', '')
+        segment = core.dna_to_rna(segment)
+        
+        return fig, segment, log_txt
         
     except Exception as e:
         import traceback
@@ -1313,7 +1545,7 @@ def inspect_gap_select(selection_str, data_map):
 # --- IGV Helper Removed ---
 # def generate_igv_html(fasta_path, bedgraph_path, locus_id): ...
 
-def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name):
+def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name, generate_bed=True):
     # Construct analysis_type string
     method_map = {"PLS-type": "kobayashi", "P-type": "yan"}
     method = method_map.get(scoring_method, scoring_method).lower()
@@ -1370,8 +1602,10 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
     try:
         with open(fasta_path, "r") as f:
             rna_text = f.read()
+            # Normalize to RNA (U)
+            rna_text = core.dna_to_rna(rna_text)
         log(f"Read FASTA content ({len(rna_text)} bytes).")
-        yield make_output("Read FASTA.")
+        yield make_output("Read FASTA.", fasta=fasta_path)
     except Exception as e:
         err_msg = f"Error reading FASTA file: {e}"
         log(err_msg)
@@ -1380,11 +1614,11 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
         
     # 3. Run Unified Analysis
     log("Starting unified analysis (this may take a few minutes)...")
-    yield make_output("Running Analysis...")
+    yield make_output("Running Analysis...", fasta=fasta_path)
     
     # 3. Run Unified Analysis logic
     log("Running Unified Analysis...")
-    yield make_output("Running Analysis...")
+    yield make_output("Running Analysis...", fasta=fasta_path)
     
     try:
         # We need to adapt the return values
@@ -1399,7 +1633,7 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
         if df is not None and len(df) > 1000:
             log(f"Truncating DataFrame for UI display (showing 1000 of {len(df)} rows). Full data in CSV.")
             
-        yield make_output("Analysis Finished.", csv=csv_path)
+        yield make_output("Analysis Finished.", fasta=fasta_path, csv=csv_path)
         
     except Exception as e:
         err_msg = f"Error during unified analysis: {e}"
@@ -1421,11 +1655,14 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
     bedgraph_path = None
     bed_path = None
     try:
+        if not generate_bed:
+            raise ValueError("SKIP_IGV")
+            
         bedgraph_path = os.path.join(TMP_DIR, f"{accession_id}_{job_name}.bedgraph")
         bed_path = os.path.join(TMP_DIR, f"{accession_id}_{job_name}.bed")
         
         log(f"Generating bedGraph and BED files...")
-        yield make_output("Generating visualization files...", csv=csv_path)
+        yield make_output("Generating visualization files...", fasta=fasta_path, csv=csv_path)
         
         from Bio import SeqIO
         record = next(SeqIO.parse(fasta_path, "fasta"))
@@ -1463,23 +1700,27 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
                 
                 if strand == 'Forward':
                     start = int(row['Genome_Position'])
-                    # Length of segment. 'Segment' column has the sequence.
-                    length = len(row['Segment'])
+                    # Lite Mode: Segment is empty. Fallback to estimated length.
+                    seg = row.get('Segment', '')
+                    if seg:
+                        length = len(seg)
+                    else:
+                        # Estimate: Default 35 or (30 + Gap)
+                        # Ideal: len(motifs) + Gap. But we don't have motifs handy in this loop easily unless we captured context.
+                        # Using fixed approximation 35 + Gap is safer than 0.
+                        length = 35 + int(row.get('Gap_Size', 0))
+                        
                     end = start + length
                     strand_char = "+"
                     color = "0,0,255" # Blue
                 else:
-                    # Reverse: Genome_Position is the 5' end on the reverse strand (high coordinate)
-                    # Wait, let's check core.py logic.
-                    # core.py: genome_pos = len(rna_seq) - 1 - row[0]
-                    # This is the index in the forward sequence corresponding to the start of the motif match on the reverse complement?
-                    # No, let's be careful.
-                    # If we have a reverse feature of length L ending at `high_coord` (inclusive):
-                    # chromEnd = high_coord + 1
-                    # chromStart = chromEnd - L
-                    
                     high_coord = int(row['Genome_Position']) # This is the index on forward strand
-                    length = len(row['Segment'])
+                    
+                    seg = row.get('Segment', '')
+                    if seg:
+                        length = len(seg)
+                    else:
+                        length = 35 + int(row.get('Gap_Size', 0))
                     
                     chromEnd = high_coord + 1
                     chromStart = chromEnd - length
@@ -1498,12 +1739,18 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
             log(f"Written {count} records to BED file.")
 
     except Exception as e:
-        err_msg = f"Error generating visualization files: {e}"
-        log(err_msg)
-        import traceback
-        log(traceback.format_exc())
-        yield make_output(err_msg, csv=csv_path)
-        return
+        if str(e) == "SKIP_IGV":
+            log("Skipping IGV files generation per user request.")
+            bedgraph_path = None
+            bed_path = None
+            yield make_output("Skipped visualization files.", fasta=fasta_path, csv=csv_path)
+        else:
+            err_msg = f"Error generating visualization files: {e}"
+            log(err_msg)
+            import traceback
+            log(traceback.format_exc())
+            yield make_output(err_msg, csv=csv_path)
+            return
             
     # Return paths for download
     log(f"Ready for download: {fasta_path}, {bedgraph_path}, {bed_path}")
@@ -1512,7 +1759,7 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
     gff3_path = None
     try:
         log(f"Fetching GFF3 annotations for {accession_id}...")
-        yield make_output("Fetching GFF3...", csv=csv_path)
+        yield make_output("Fetching GFF3...", fasta=fasta_path, csv=csv_path, bedgraph=bedgraph_path, bed=bed_path)
         gff3_path = ncbi.fetch_gff(accession_id, output_dir=TMP_DIR)
         if gff3_path:
             log(f"Fetched GFF3: {gff3_path}")
@@ -1601,15 +1848,20 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
         csv_output = gr.File(label="Download CSV")
         
     # State
+    # State
     df_state = gr.State()
+    analysis_context_state = gr.State({})
+    manual_data_state = gr.State({}) # Store detail data for gap selection
+    ncbi_data_state = gr.State({}) # For NCBI tab Gap Selection
     
     with gr.Tab("NCBI Analysis"):
         gr.Markdown("### Import Target Sequence from NCBI and Analyze")
         gr.Markdown("Enter an NCBI Accession ID to fetch the sequence and analyze binding sites. Download the generated FASTA and BedGraph files to view them in the [IGV Desktop Application](https://igv.org/doc/desktop/).")
         
         with gr.Row():
-            ncbi_accession = gr.Textbox(label="NCBI Accession ID", placeholder=f"Default: {DEFAULT_ACCESSION}")
-            ncbi_btn = gr.Button("Fetch & Analyze", variant="primary")
+            ncbi_accession = gr.Textbox(label="NCBI Accession ID", placeholder=f"Default: {DEFAULT_ACCESSION}", scale=2)
+            chk_generate_bed = gr.Checkbox(label="Generate IGV Files", value=False, scale=1) 
+            ncbi_btn = gr.Button("Fetch & Analyze", variant="primary", scale=1)
         
         with gr.Row():
             ncbi_fasta_download = gr.File(label="Download FASTA (Reference Genome)")
@@ -1637,8 +1889,8 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
         gr.Markdown("### Range Inspector")
         gr.Markdown("Inspect a specific genomic range with gene annotations.")
         with gr.Row():
-            range_start = gr.Number(label="Start Position", value=132162, precision=0)
-            range_end = gr.Number(label="End Position", value=135622, precision=0)
+            range_start = gr.Number(label="Start Position", value=133162, precision=0)
+            range_end = gr.Number(label="End Position", value=134622, precision=0)
             range_btn = gr.Button("Inspect Range")
         
         with gr.Row():
@@ -1654,24 +1906,32 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             plot_height = gr.Slider(minimum=400, maximum=1200, value=500, step=50, label="Plot Height (px)")
             
         range_plot = gr.Plot(label="Range Browser")
+        # range_files = gr.File(label="Download Range Results (CSV & Interactive Plot)") # Removed
             
         def on_range_click(accession, start, end, csv_file, gff_file, features, height, highlight_top, highlight_strand):
             if not csv_file:
                 return go.Figure(layout=dict(title="No CSV file found. Run analysis first."))
             try:
-                # Optimized load: only read necessary columns, skip parsing lists
+                # Optimized load
                 cols = ['Genome_Position', 'PPR_Binding_Score', 'PPR_Name', 'Strand', 'Analysis_Type']
                 df = load_csv_optimized(csv_file.name, usecols=cols)
                 
-                # GFF file object or path?
+                # GFF file object or path
                 gff_path = gff_file.name if gff_file else None
-                return plot_range_browser(df, gff_path, int(start), int(end), accession, features, int(height), highlight_top=highlight_top, highlight_strand=highlight_strand)
+                
+                # Generate Figure
+                fig = plot_range_browser(df, gff_path, int(start), int(end), accession, features, int(height), highlight_top=highlight_top, highlight_strand=highlight_strand)
+                
+                return fig
+                
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 return go.Figure(layout=dict(title=f"Error: {e}"))
 
         range_btn.click(
             on_range_click,
-            inputs=[ncbi_accession, range_start, range_end, ncbi_download, ncbi_gff_download, feature_types, plot_height],
+            inputs=[ncbi_accession, range_start, range_end, ncbi_download, ncbi_gff_download, feature_types, plot_height, highlight_ncbi, strand_ncbi],
             outputs=[range_plot]
         )
             
@@ -1681,12 +1941,13 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             with gr.Column(scale=1):
                 ncbi_manual_pos = gr.Number(label="Genome Position", precision=0)
                 ncbi_manual_strand = gr.Radio(["Forward", "Reverse"], value="Forward", label="Strand")
+                ncbi_gap_select = gr.Dropdown(label="Alignment Variation", choices=[], visible=True)
                 ncbi_manual_btn = gr.Button("Show Detail")
             with gr.Column(scale=3):
                 ncbi_detail_plot = gr.Plot(label="Site Detail")
                 ncbi_detail_seq = gr.Textbox(label="Binding Sequence", interactive=True)
             
-        def on_ncbi_detail_click(csv_file, pos, strand):
+        def on_ncbi_detail_click(csv_file, fasta_file, pos, strand):
             if not csv_file:
                 return go.Figure(layout=dict(title="No CSV file found. Run analysis first.")), "", "Error: No CSV file."
             try:
@@ -1696,23 +1957,27 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
                 if df.empty:
                     return go.Figure(layout=dict(title="Site not found in results.")), "", "Site not found."
                 
-                # Pass empty context for static mode, discard dropdown/state updates
-                _, _, fig, seq, log_txt = show_manual_detail(pos, strand, df, {})
-                return fig, seq, log_txt
+                # Reconstruct context for Dynamic Mode (Alignment Variation)
+                fasta_path = fasta_file.name if fasta_file else None
+                context = reconstruct_context_from_csv(csv_file.name, fasta_path=fasta_path)
+                
+                # show_manual_detail returns: dropdown_update, data_map, fig, seq, log
+                gap_upd, data_st, fig, seq, log_txt = show_manual_detail(pos, strand, df, context)
+                return gap_upd, data_st, fig, seq, log_txt
             except Exception as e:
                 import traceback
                 traceback.print_exc()
-                return go.Figure(layout=dict(title=f"Error: {e}")), "", f"Error in ncbi detail: {e}"
+                # Return empty updates for all
+                return gr.update(), {}, go.Figure(layout=dict(title=f"Error: {e}")), "", f"Error in ncbi detail: {e}"
 
         ncbi_manual_btn.click(
             on_ncbi_detail_click,
-            inputs=[ncbi_download, ncbi_manual_pos, ncbi_manual_strand],
-            outputs=[ncbi_detail_plot, ncbi_detail_seq, debug_console]
+            inputs=[ncbi_download, ncbi_fasta_download, ncbi_manual_pos, ncbi_manual_strand],
+            outputs=[ncbi_gap_select, ncbi_data_state, ncbi_detail_plot, ncbi_detail_seq, debug_console]
         )
         
     # Events
-    analysis_context_state = gr.State({})
-    manual_data_state = gr.State({}) # Store detail data for gap selection 
+    # Events 
 
     run_btn.click(
         run_unified_analysis,
@@ -1736,10 +2001,18 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
     )
     
     # Gap Dropdown Change Event
+    # Gap Dropdown Change Event (Main Tab)
     gap_select.change(
         inspect_gap_select, 
         inputs=[gap_select, manual_data_state],
         outputs=[plot_detail, detail_seq, debug_console] # inspect_gap_select returns fig, seq, log
+    )
+    
+    # Gap Dropdown Change Event (NCBI Tab)
+    ncbi_gap_select.change(
+        inspect_gap_select, 
+        inputs=[ncbi_gap_select, ncbi_data_state],
+        outputs=[ncbi_detail_plot, ncbi_detail_seq, debug_console]
     )
     
     # 5. Load Results logic (Main Tab)
@@ -1796,9 +2069,14 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
     # demo.load -> can't reset state easily without inputs.
     
     # NCBI Event
+    
+    # Reposition Start button row? No, just add input.
+    # Where is ncbi_btn defined? Higher up.
+    # Let's insert the checkbox near the button or implicitly adding it to inputs list.
+    
     ncbi_btn.click(
         run_ncbi_analysis,
-        inputs=[ncbi_accession, prot_text, prot_file, tool_select, scoring_method, max_gap_size, use_ps_score, job_name_input],
+        inputs=[ncbi_accession, prot_text, prot_file, tool_select, scoring_method, max_gap_size, use_ps_score, job_name_input, chk_generate_bed],
         outputs=[ncbi_log_output, ncbi_fasta_download, ncbi_bedgraph_download, ncbi_bed_download, ncbi_gff_download, ncbi_download, ncbi_log_output]
     )
     

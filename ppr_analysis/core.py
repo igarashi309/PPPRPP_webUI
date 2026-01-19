@@ -22,21 +22,27 @@ def get_reverse_complement(seq):
     rev_seq = "".join(complement.get(base, base) for base in reversed(seq))
     return rev_seq
 
-def generate_gap_variations(motif_labels, ppr_scores, min_front, min_back, max_gap):
+def generate_gap_variations(motif_labels, ppr_scores, min_front, min_back, max_gap, all_gaps=False):
     """
     Generates variations of motif labels with gaps.
+    If all_gaps is True, generates all gap sizes from 1 to max_gap.
+    Otherwise (default), generates only gap 0 and max_gap (optimization).
     """
     gap_variations = [(motif_labels, ppr_scores, 0, 0)]  # GAP 0, Pos 0
 
-    # Optimization: User requested ONLY Gap 0 and Gap N (target).
-    # Skip intermediate gaps (1..N-1) to save time, as confirmed by User.
-    target_gaps = [int(max_gap)] if max_gap > 0 else []
+    target_gaps = []
+    if max_gap > 0:
+        if all_gaps:
+             target_gaps = list(range(1, int(max_gap) + 1))
+        else:
+             target_gaps = [int(max_gap)]
     
     for gap_size in target_gaps:
         for front_size in range(min_front, len(motif_labels) - min_back + 1):
             gap_variation = motif_labels[:front_size] + ['--'] * gap_size + motif_labels[front_size:]
             gap_scores = ppr_scores[:front_size] + [0] * gap_size + ppr_scores[front_size:]
             gap_variations.append((gap_variation, gap_scores, gap_size, front_size))
+            
     return gap_variations
 
 def calculate_binding_score_numpy(rna_seq, motif_binding_scores, motif_labels, ppr_scores):
@@ -206,7 +212,7 @@ def calculate_binding_score(rna_seq, motif_binding_scores, motif_labels, ppr_sco
     # For this refactor, I will update `process_fasta_sequences` to use `calculate_binding_score_numpy`.
     pass
 
-def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_variations, ppr_name, predicted_scores, use_ps_score=True):
+def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_variations, ppr_name, predicted_scores, use_ps_score=True, detailed_output=True):
     """
     Processes FASTA sequence with given variations.
     Optimized to use NumPy.
@@ -233,6 +239,9 @@ def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_v
     # Pre-calculate Total Scores for ALL variations
     # Result: list of (total_scores_array, variation_obj)
     variation_results = []
+    
+    # Optimization: If Lite Mode, we can optimize the loop?
+    # No, we need total scores for filter. 
     
     for v_idx, variation in enumerate(motif_labels_variations):
         motif_labels, ppr_scores_original, gap_size, gap_pos = variation
@@ -331,20 +340,35 @@ def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_v
         # Constant strings
         m_labels_str = ','.join(motif_labels)
         
-        # Extend constant columns
+        # Extend constant columns (ALWAYS NEEDED)
         out_pos.extend(range(num_sites))
         out_ppr_name.extend([ppr_name] * num_sites)
-        out_motif_labels.extend([m_labels_str] * num_sites)
-        out_motif_labels_gap.extend([m_labels_str] * num_sites)
         out_gap_size.extend([gap_size] * num_sites)
         out_gap_index.extend([gap_pos] * num_sites)
-        out_pred_scores_list.extend([predicted_scores] * num_sites)
-        out_conf_scores.extend([ppr_scores_original] * num_sites)
         out_total_score.extend(scores.tolist())
         
         # Complex columns Loop
-        # We need to compute Segment and Detail Scores for each site.
-        # This is the performance bottleneck.
+        if not detailed_output:
+            # Lite Mode: Drop ALL redundant columns that can be inferred from context
+            out_segment.extend([""] * num_sites)
+            
+            # Empty lists / placeholders for heavy columns
+            out_binding_scores_list.extend([[]] * num_sites) 
+            out_ppr_motif_scores.extend([[]] * num_sites)
+            out_pred_scores_list.extend([[]] * num_sites)
+            
+            # Also drop constant columns repeated millions of times
+            out_motif_labels.extend([""] * num_sites) 
+            out_motif_labels_gap.extend([""] * num_sites)
+            out_conf_scores.extend([[]] * num_sites)
+            continue
+            
+        # Detailed Mode: Extend with actual large data
+        out_motif_labels.extend([m_labels_str] * num_sites)
+        out_motif_labels_gap.extend([m_labels_str] * num_sites)
+        out_pred_scores_list.extend([predicted_scores] * num_sites)
+        out_conf_scores.extend([ppr_scores_original] * num_sites)
+        
         motif_length = len(motif_labels)
         
         # 1. Segments
@@ -445,36 +469,62 @@ def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_v
 
     return all_scores
 
-def analyze_ppr_data(motif_data, fasta_sequence, min_front, min_back, max_gap, predicted_scores, ppr_name):
+def analyze_ppr_data(motif_data, fasta_sequence, min_front, min_back, max_gap, predicted_scores, ppr_name, detailed_output=True, target_analysis=None):
     """
-    Analyzes a single PPR data object (extracted from pickle).
+    Analyzes PPR data. 
+    If target_analysis is provided (dict with keys 'method', 'use_ps', 'gap_mode'), 
+    computes ONLY that specific analysis. Otherwise computes all 8 variations (legacy behavior).
     
-    Args:
-        motif_data (dict): {'motif_labels': [], 'ppr_scores': []}
-        fasta_sequence (str): The sequence.
-        min_front, min_back, max_gap (int): Gap parameters.
-        predicted_scores (list): List of predicted scores.
-        ppr_name (str): Name of the PPR.
-        
-    Returns:
-        dict: Scores for all analysis options.
+    target_analysis example: {'method': 'yan', 'use_ps': False, 'gap_mode': 'varied'} 
+    gap_mode: 'gap0' or 'varied'
     """
     motif_labels = motif_data['motif_labels']
     ppr_scores = motif_data['ppr_scores']
     
-    gap0_variations = [(motif_labels, ppr_scores, 0, 0)]
-    gap_variations = generate_gap_variations(motif_labels, ppr_scores, min_front, min_back, max_gap)
+    scores = {}
     
-    scores = {
-        'kobayashi_gap0_ps': process_fasta_sequences(fasta_sequence, KOBAYASHI_BINDING_SCORES, gap0_variations, ppr_name, predicted_scores, use_ps_score=True),
-        'kobayashi_gap_ps': process_fasta_sequences(fasta_sequence, KOBAYASHI_BINDING_SCORES, gap_variations, ppr_name, predicted_scores, use_ps_score=True),
-        'kobayashi_gap0_no_ps': process_fasta_sequences(fasta_sequence, KOBAYASHI_BINDING_SCORES, gap0_variations, ppr_name, predicted_scores, use_ps_score=False),
-        'kobayashi_gap_no_ps': process_fasta_sequences(fasta_sequence, KOBAYASHI_BINDING_SCORES, gap_variations, ppr_name, predicted_scores, use_ps_score=False),
-        'yan_gap0_ps': process_fasta_sequences(fasta_sequence, YAN_BINDING_SCORES, gap0_variations, ppr_name, predicted_scores, use_ps_score=True),
-        'yan_gap_ps': process_fasta_sequences(fasta_sequence, YAN_BINDING_SCORES, gap_variations, ppr_name, predicted_scores, use_ps_score=True),
-        'yan_gap0_no_ps': process_fasta_sequences(fasta_sequence, YAN_BINDING_SCORES, gap0_variations, ppr_name, predicted_scores, use_ps_score=False),
-        'yan_gap_no_ps': process_fasta_sequences(fasta_sequence, YAN_BINDING_SCORES, gap_variations, ppr_name, predicted_scores, use_ps_score=False)
-    }
+    # Helper to determine which to run
+    def should_run(method, use_ps, mode):
+        if not target_analysis: return True # Run all
+        if target_analysis['method'] != method: return False
+        if target_analysis['use_ps'] != use_ps: return False
+        if target_analysis['gap_mode'] != mode: return False
+        return True
+        
+    gap0_vars = None
+    gapN_vars = None
+    
+    # Kobayashi
+    if should_run('kobayashi', True, 'gap0') or should_run('kobayashi', False, 'gap0'):
+        gap0_vars = [(motif_labels, ppr_scores, 0, 0)]
+    if should_run('kobayashi', True, 'varied') or should_run('kobayashi', False, 'varied'):
+        gapN_vars = generate_gap_variations(motif_labels, ppr_scores, min_front, min_back, max_gap)
+
+    # Yan
+    if should_run('yan', True, 'gap0') or should_run('yan', False, 'gap0'):
+        gap0_vars = [(motif_labels, ppr_scores, 0, 0)]
+    if should_run('yan', True, 'varied') or should_run('yan', False, 'varied'):
+        if gapN_vars is None: gapN_vars = generate_gap_variations(motif_labels, ppr_scores, min_front, min_back, max_gap)
+
+    # Execute
+    if should_run('kobayashi', True, 'gap0'):
+        scores['kobayashi_gap0_ps'] = process_fasta_sequences(fasta_sequence, KOBAYASHI_BINDING_SCORES, gap0_vars, ppr_name, predicted_scores, True, detailed_output)
+    if should_run('kobayashi', True, 'varied'):
+        scores['kobayashi_gap_ps'] = process_fasta_sequences(fasta_sequence, KOBAYASHI_BINDING_SCORES, gapN_vars, ppr_name, predicted_scores, True, detailed_output)
+    if should_run('kobayashi', False, 'gap0'):
+        scores['kobayashi_gap0_no_ps'] = process_fasta_sequences(fasta_sequence, KOBAYASHI_BINDING_SCORES, gap0_vars, ppr_name, predicted_scores, False, detailed_output)
+    if should_run('kobayashi', False, 'varied'):
+        scores['kobayashi_gap_no_ps'] = process_fasta_sequences(fasta_sequence, KOBAYASHI_BINDING_SCORES, gapN_vars, ppr_name, predicted_scores, False, detailed_output)
+        
+    if should_run('yan', True, 'gap0'):
+        scores['yan_gap0_ps'] = process_fasta_sequences(fasta_sequence, YAN_BINDING_SCORES, gap0_vars, ppr_name, predicted_scores, True, detailed_output)
+    if should_run('yan', True, 'varied'):
+        scores['yan_gap_ps'] = process_fasta_sequences(fasta_sequence, YAN_BINDING_SCORES, gapN_vars, ppr_name, predicted_scores, True, detailed_output)
+    if should_run('yan', False, 'gap0'):
+        scores['yan_gap0_no_ps'] = process_fasta_sequences(fasta_sequence, YAN_BINDING_SCORES, gap0_vars, ppr_name, predicted_scores, False, detailed_output)
+    if should_run('yan', False, 'varied'):
+        scores['yan_gap_no_ps'] = process_fasta_sequences(fasta_sequence, YAN_BINDING_SCORES, gapN_vars, ppr_name, predicted_scores, False, detailed_output)
+
     return scores
 
 def analyze_single_site(motif_data, rna_seq, site_pos, min_front, min_back, max_gap, predicted_scores, use_ps_score, method):
@@ -492,7 +542,7 @@ def analyze_single_site(motif_data, rna_seq, site_pos, min_front, min_back, max_
          motif_binding_scores = YAN_BINDING_SCORES
          
     # Generate variations
-    variations = generate_gap_variations(motif_data['motif_labels'], motif_data['ppr_scores'], min_front, min_back, max_gap)
+    variations = generate_gap_variations(motif_data['motif_labels'], motif_data['ppr_scores'], min_front, min_back, max_gap, all_gaps=True)
     
     results = []
     
@@ -502,7 +552,7 @@ def analyze_single_site(motif_data, rna_seq, site_pos, min_front, min_back, max_
         ppr_scores_for_calc = [1.0] * len(motif_data['motif_labels'])
         
     # Re-generate variations with correct calc scores
-    calc_variations = generate_gap_variations(motif_data['motif_labels'], ppr_scores_for_calc, min_front, min_back, max_gap)
+    calc_variations = generate_gap_variations(motif_data['motif_labels'], ppr_scores_for_calc, min_front, min_back, max_gap, all_gaps=True)
     
     seq_len = len(rna_seq)
     
