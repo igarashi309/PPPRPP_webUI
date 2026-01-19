@@ -1,50 +1,49 @@
-# PPR Motif Analyzer (Local Version) v0.0.7
+# P-type PPR Prediction Program (PPPRPP)
 
 A standalone web application for identifying PPR motifs in protein sequences and analyzing their binding sites on RNA targets.
 
-## New in v0.0.7
-- **Gap Analysis**: Configurable "Max Gap Size" slider. Analysis optimized to process only the target gap size for speed.
-- **Improved Visualization**: 
-    - **Motif Plot**: Red-Blue gradient for confidence scores, cleaner labels (#Num), and FASTA name in title.
-    - **Site Inspector**: Manual selection of alignment variations (Gap positions) via dropdown.
-    - **Labels**: Clearer nomenclature (PLS-type/P-type) and explicit gap information.
-
 ## Features
 - **Unified Workflow**: Input Protein and RNA sequences to perform discovery and analysis in one step.
-- **Interactive Visualization**: Genome Browser with clickable sites to view detailed binding scores.
+- **Interactive Visualization**: Genome Browser with detailed binding scores and interactive site inspection.
+- **Gap Analysis**: Analyze binding sites with flexible gap parameters (Gap 0, 1, 2, etc, or "Max Gap").
 - **Cross-Platform**: Runs on Windows, Mac, and Linux.
 
-## Prerequisites
+## Quick Start (Mac / Linux)
 
-Before running, ensure you have the following installed:
+### 1. Initial Setup (Run Once)
 
-1.  **Python 3.10+**
-2.  **HMMER (`hmmsearch`)**: Required for motif discovery.
-    - **Mac**: `brew install hmmer`
-    - **Linux**: `sudo apt install hmmer`
-    - **Windows**: Download HMMER binaries (http://hmmer.org/) and add to your system PATH, or run this tool inside WSL (Windows Subsystem for Linux).
-    -   **Mac**: `brew install hmmer`
-    -   **Linux**: `sudo apt install hmmer`
-    -   **Windows**: Please use **WSL (Windows Subsystem for Linux)**. Native Windows support is not available. Install `hmmer` inside WSL using `sudo apt install hmmer`.
+**Mac**:
+- Double-click `install.command`.
 
-## How to Run
+**Linux**:
+- Open terminal and run:
+  ```bash
+  bash install.command
+  ```
 
-### Mac / Linux / WSL
-1.  Open Terminal.
-2.  Navigate to this folder.
-3.  Run the launch script:
-    ```bash
-    bash setup_and_run.sh
-    ```
+This script will:
+1.  Check/Install **HMMER** (required for motif discovery).
+    -   *Mac*: Uses Homebrew (`brew install hmmer`).
+    -   *Linux*: Uses apt (`sudo apt install hmmer`).
+2.  Create a Python environment.
+3.  Install all dependencies.
 
-The script will automatically:
-1.  Create a Python virtual environment (`venv`).
-2.  Install necessary libraries (`gradio`, `biopython`, etc.).
-3.  Download required data files (`PPRfinder.jar`, HMM models).
-4.  Launch the application in your default web browser.
+### 2. Launch App
+
+**Mac**:
+- Double-click `start.command`.
+
+**Linux**:
+- Open terminal and run:
+  ```bash
+  bash start.command
+  ```
+
+The application will open automatically in your default web browser.
 
 ## Troubleshooting
 
-- **"Java not found"**: Install Java and ensure `java` command works in terminal/cmd.
--   **"hmmsearch not found"**: Install HMMER. On Windows, ensure you are running in WSL.
+- **"hmmsearch not found"**: The installer attempts to install HMMER. If it fails, please install it manually:
+    -   **Mac**: `brew install hmmer`
+    -   **Linux**: `sudo apt install hmmer` (or within WSL on Windows)
 - **Browser doesn't open**: Look for a URL in the console output (e.g., `http://127.0.0.1:7860`) and open it manually.
