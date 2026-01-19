@@ -14,19 +14,35 @@ from Bio import SeqIO
 import io
 import shutil
 
+# --- Constants ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data")
+OUTPUT_DIR = os.path.join(DATA_DIR, "output")
+INPUT_DIR = os.path.join(DATA_DIR, "input")
+
+# Ensure directories exist
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+os.makedirs(INPUT_DIR, exist_ok=True)
+
+TMP_DIR = OUTPUT_DIR
+
+VERSION = "v0.0.9"
+
 def cleanup_temp_files():
     """Cleans up temporary files from previous runs."""
-    patterns = ["*.csv", "*.fasta", "*.bedgraph", "*.bed", "*.gff3"]
-    count = 0
-    for pattern in patterns:
-        for f in glob.glob(os.path.join(tempfile.gettempdir(), pattern)):
-            try:
-                os.remove(f)
-                count += 1
-            except Exception as e:
-                print(f"Error deleting {f}: {e}")
-    if count > 0:
-        print(f"Cleaned up {count} temporary files.")
+    # Disabled for persistent output directory usage
+    pass
+    # patterns = ["*.csv", "*.fasta", "*.bedgraph", "*.bed", "*.gff3"]
+    # count = 0
+    # for pattern in patterns:
+    #     for f in glob.glob(os.path.join(TMP_DIR, pattern)): # Changed to TMP_DIR context if active
+    #         try:
+    #             os.remove(f)
+    #             count += 1
+    #         except Exception as e:
+    #             print(f"Error deleting {f}: {e}")
+    # if count > 0:
+    #     print(f"Cleaned up {count} temporary files.")
 
 # Import package modules
 from ppr_analysis import core, io as ppr_io, visualization, config, motif_generation, ncbi
@@ -35,11 +51,6 @@ from ppr_analysis import core, io as ppr_io, visualization, config, motif_genera
 if int(gr.__version__.split('.')[0]) < 4:
     raise RuntimeError(f"Gradio version {gr.__version__} is too old. Please install gradio>=4.0.0")
 print(f"Gradio Version: {gr.__version__}")
-
-# --- Constants ---
-TMP_DIR = tempfile.gettempdir()
-
-VERSION = "v0.0.8"
 
 custom_css = """
 #debug_console {
@@ -134,6 +145,51 @@ def load_csv_optimized(path, usecols=None):
         print(f"Error loading optimized CSV: {e}")
         return pd.DataFrame()
 
+def load_single_site_optimized(path, target_pos, target_strand):
+    """Loads a single row matching Position and Strand, parsing list columns."""
+    try:
+        # 1. Load Filtered (Fast)
+        df = pd.read_csv(path)
+        
+        # 2. Filter target
+        try:
+            target_pos = int(target_pos)
+        except:
+            pass # Keep as is if conversion fails, though it should be int
+            
+        subset = df[(df['Genome_Position'] == target_pos) & (df['Strand'] == target_strand)]
+        
+        if subset.empty:
+            return pd.DataFrame()
+            
+        # 3. Parse list columns ONLY for this subset (usually 1 row)
+        row = subset.head(1).copy() # Take first match
+        
+        list_cols = ['PPR_Binding_Scores_List', 'PPR_Motif_Scores', 'Predicted PPR Motif Scores List', 'Motif_Confidence_Scores']
+        
+        def parse_val(x):
+            if isinstance(x, str):
+                try:
+                    return ast.literal_eval(x)
+                except:
+                    # Fallback to manual parsing if literal_eval fails
+                     if x.startswith('[') and x.endswith(']'):
+                         try:
+                             return [float(i) for i in x[1:-1].split(',')]
+                         except:
+                             return []
+            return x
+
+        for col in list_cols:
+            if col in row.columns:
+                row[col] = row[col].apply(parse_val)
+                
+        return row # Returns DataFrame with 1 row
+        
+    except Exception as e:
+        print(f"Error in load_single_site_optimized: {e}")
+        return pd.DataFrame()
+
 def load_result(filename):
     """Loads a past result CSV and updates the UI."""
     # Output signature: status, csv, browser, motif_plot, motif_table, range_plot, df_state, analysis_context
@@ -171,7 +227,7 @@ def load_result(filename):
         print(f"Error loading result: {e}")
         return f"Error loading: {e}", None, go.Figure(), go.Figure(), pd.DataFrame(), go.Figure(), None, {}
 
-def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name, skip_plots=False):
+def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_choice, scoring_method, max_gap_size, use_ps_score, job_name, highlight_top=False, highlight_strand="Both", skip_plots=False):
     # Construct analysis_type string
     method_map = {"PLS-type": "kobayashi", "P-type": "yan"}
     method = method_map.get(scoring_method, scoring_method).lower()
@@ -188,7 +244,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
             protein_input = DEFAULT_PROTEIN
 
     if not protein_input:
-        return "Error: Please provide a protein sequence.", None, None, None, None, None, None, None, None, None
+        return "Error: Please provide a protein sequence.", None, None, None, None, None, None, None, None, None, None
 
     if not protein_input.strip().startswith(">"):
         protein_input = f">UserSequence\n{protein_input}"
@@ -203,7 +259,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
             rna_input = DEFAULT_RNA
 
     if not rna_input:
-        return "Error: Please provide an RNA sequence.", None, None, None, None, None, None, None, None
+        return "Error: Please provide an RNA sequence.", None, None, None, None, None, None, None, None, None
         
     sequence = ""
     seq_id = job_name
@@ -238,10 +294,10 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
             motifs_file = Path(output_dir) / f"{seq_id}_motifs.txt"
             
         if not pkl_path:
-             return "Error: Motif discovery failed.", None, None, None, None, None, None, None, None
+             return "Error: Motif discovery failed.", None, None, None, None, None, None, None, None, None
 
     except Exception as e:
-        return f"Error during discovery: {e}", None, None, None, None, None, None, None, None
+        return f"Error during discovery: {e}", None, None, None, None, None, None, None, None, None
     finally:
         if os.path.exists(tmp_fasta_path):
             os.remove(tmp_fasta_path)
@@ -254,7 +310,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
         motif_data = ppr_io.load_ppr_data_from_pickle(pkl_path)
         ppr_name = os.path.basename(pkl_path)
     except Exception as e:
-        return f"Error loading motifs: {e}", None, None, None, None, None, None, None, None
+        return f"Error loading motifs: {e}", None, None, None, None, None, None, None, None, None
 
     # Run Analysis (Both Strands)
     min_front = 1 # Allow gaps closer to ends
@@ -264,7 +320,7 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     # Prepare RNA sequence
     # rna_input is already defined from rna_text or rna_file earlier.
     if not rna_input:
-        return "Error: No RNA sequence provided.", None, None, None, None, None, None, None, None
+        return "Error: No RNA sequence provided.", None, None, None, None, None, None, None, None, None
 
     # Parse RNA FASTA
     try:
@@ -347,9 +403,9 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return f"Error during analysis: {e}", None, None, None, None, None, None, None, None
+        return f"Error during analysis: {e}", None, None, None, None, None, None, None, None, None
     if not all_scores["Position_Relative"]:
-        return "Error: No binding sites found.", None, None, None, None, None, None, None, None
+        return "Error: No binding sites found.", None, None, None, None, None, None, None, None, None
 
     # Create DataFrame
     df_output = pd.DataFrame(all_scores)
@@ -429,7 +485,9 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
             print(f"Warning: Failed to save motifs file: {e}")
 
     # 5. Visualization (Genome Browser)
-    fig = plot_genome_browser(df_output, seq_id, analysis_type)
+    fig = go.Figure()
+    if not skip_plots:
+        fig = plot_genome_browser(df_output, seq_id, analysis_type, highlight_top=highlight_top, highlight_strand=highlight_strand)
 
     
     # 6. Visualize Motifs
@@ -478,7 +536,13 @@ def parse_analysis_type(atype_str):
         return f"Method: {method} | Gap: {gap} | Score: {ps}"
     return atype_str
 
-def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis"):
+def update_main_browser_plot(df, highlight, strand):
+    if df is None or df.empty:
+        return go.Figure()
+    # analysis_type will be extracted from DF by plot_genome_browser
+    return plot_genome_browser(df, analysis_type=None, highlight_top=highlight, highlight_strand=strand)
+
+def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis", highlight_top=False, highlight_strand="Both"):
     """Helper to plot the genome browser."""
     # Try to get analysis type from DF if not provided or generic
     if (analysis_type == "Analysis" or analysis_type is None) and 'Analysis_Type' in df.columns and not df.empty:
@@ -531,6 +595,36 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis"):
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<extra></extra>"
             ), row=2, col=1)
 
+    # Highlight Top Score
+    if highlight_top and not df.empty:
+        # Filter by strand if requested
+        if highlight_strand == "Forward":
+            df_search = df[df['Strand'] == 'Forward']
+        elif highlight_strand == "Reverse":
+            df_search = df[df['Strand'] == 'Reverse']
+        else:
+            df_search = df
+            
+        if not df_search.empty:
+            top_idx = df_search['PPR_Binding_Score'].abs().idxmax()
+            top_row = df.loc[top_idx] # Access from original df to be safe with indices
+            
+            t_pos = top_row['Genome_Position']
+            t_score = top_row['PPR_Binding_Score']
+            t_strand = top_row['Strand']
+            
+            # Determine row based on strand
+            row_idx = 1 if t_strand == "Forward" else 2
+            
+            fig.add_trace(go.Scatter(
+                x=[t_pos], y=[t_score],
+                mode='markers',
+                marker=dict(symbol='star', size=15, color='gold', line=dict(width=2, color='black')),
+                name=f"Top Score ({t_strand})",
+                hoverinfo='text',
+                hovertext=f"TOP SCORE<br>Pos: {t_pos}<br>Score: {t_score:.2f}"
+            ), row=row_idx, col=1)
+
     fig.update_layout(
         title=f"Genome Browser - {seq_id}<br><sup>{readable_condition}</sup>",
         height=500,
@@ -544,7 +638,7 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis"):
     
     return fig
 
-def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_types=None, plot_height=500):
+def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_types=None, plot_height=500, highlight_top=False, highlight_strand="Both"):
     """Plots binding scores and gene annotations for a specific range."""
     # Extract analysis type from DF
     analysis_type = "Analysis"
@@ -600,6 +694,36 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
                 marker=dict(color=color, size=8, symbol='x'),
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<extra></extra>"
             ), row=3, col=1)
+
+    # Highlight Top Score in Range
+    if highlight_top and not df_range.empty:
+         # Filter by strand if requested
+        if highlight_strand == "Forward":
+            df_search = df_range[df_range['Strand'] == 'Forward']
+        elif highlight_strand == "Reverse":
+            df_search = df_range[df_range['Strand'] == 'Reverse']
+        else:
+            df_search = df_range
+            
+        if not df_search.empty:
+            top_idx = df_search['PPR_Binding_Score'].abs().idxmax()
+            top_row = df_range.loc[top_idx] 
+            
+            t_pos = top_row['Genome_Position']
+            t_score = top_row['PPR_Binding_Score']
+            t_strand = top_row['Strand']
+            
+            # Row 1 for Fwd, Row 3 for Rev
+            row_idx = 1 if t_strand == "Forward" else 3
+            
+            fig.add_trace(go.Scatter(
+                x=[t_pos], y=[t_score],
+                mode='markers',
+                marker=dict(symbol='star', size=15, color='gold', line=dict(width=2, color='black')),
+                name=f"Top Score ({t_strand})",
+                hoverinfo='text',
+                hovertext=f"TOP SCORE<br>Pos: {t_pos}<br>Score: {t_score:.2f}"
+            ), row=row_idx, col=1)
 
     # 2. Plot Gene Annotations from GFF3 (Row 2)
     fig.add_trace(go.Scatter(x=[start, end], y=[0, 0], mode='markers', marker=dict(opacity=0), showlegend=False, hoverinfo='skip'), row=2, col=1)
@@ -1451,6 +1575,10 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             motif_table = gr.DataFrame(label="Motif Details")
             
     with gr.Row():
+        chk_highlight_main = gr.Checkbox(label="Highlight Top Score", value=False)
+        dd_strand_main = gr.Dropdown(choices=["Forward", "Reverse", "Both"], value="Both", label="Highlight Strand", interactive=True)
+        
+    with gr.Row():
         plot_browser = gr.Plot(label="Genome Browser (Click point to see details)")
     
     with gr.Row():
@@ -1514,6 +1642,10 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             range_btn = gr.Button("Inspect Range")
         
         with gr.Row():
+            highlight_ncbi = gr.Checkbox(label="Highlight Top Score", value=False)
+            strand_ncbi = gr.Dropdown(choices=["Forward", "Reverse", "Both"], value="Both", label="Highlight Strand", interactive=True)
+            
+        with gr.Row():
             feature_types = gr.CheckboxGroup(
                 ["gene", "CDS", "tRNA", "rRNA", "exon"], 
                 value=["gene", "tRNA", "rRNA"], 
@@ -1523,7 +1655,7 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             
         range_plot = gr.Plot(label="Range Browser")
             
-        def on_range_click(accession, start, end, csv_file, gff_file, features, height):
+        def on_range_click(accession, start, end, csv_file, gff_file, features, height, highlight_top, highlight_strand):
             if not csv_file:
                 return go.Figure(layout=dict(title="No CSV file found. Run analysis first."))
             try:
@@ -1533,7 +1665,7 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
                 
                 # GFF file object or path?
                 gff_path = gff_file.name if gff_file else None
-                return plot_range_browser(df, gff_path, int(start), int(end), accession, features, int(height))
+                return plot_range_browser(df, gff_path, int(start), int(end), accession, features, int(height), highlight_top=highlight_top, highlight_strand=highlight_strand)
             except Exception as e:
                 return go.Figure(layout=dict(title=f"Error: {e}"))
 
@@ -1556,13 +1688,20 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
             
         def on_ncbi_detail_click(csv_file, pos, strand):
             if not csv_file:
-                return go.Figure(layout=dict(title="No CSV file found. Run analysis first.")), ""
+                return go.Figure(layout=dict(title="No CSV file found. Run analysis first.")), "", "Error: No CSV file."
             try:
-                df = load_csv_with_parsing(csv_file.name)
+                # Optimized Loading: Find ONLY the target row
+                df = load_single_site_optimized(csv_file.name, pos, strand)
+                
+                if df.empty:
+                    return go.Figure(layout=dict(title="Site not found in results.")), "", "Site not found."
+                
                 # Pass empty context for static mode, discard dropdown/state updates
                 _, _, fig, seq, log_txt = show_manual_detail(pos, strand, df, {})
                 return fig, seq, log_txt
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 return go.Figure(layout=dict(title=f"Error: {e}")), "", f"Error in ncbi detail: {e}"
 
         ncbi_manual_btn.click(
@@ -1580,7 +1719,8 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
         inputs=[
             prot_text, prot_file,
             rna_text, rna_file,
-            tool_select, scoring_method, max_gap_size, use_ps_score, job_name_input
+            tool_select, scoring_method, max_gap_size, use_ps_score, job_name_input,
+            chk_highlight_main, dd_strand_main
         ],
         outputs=[
             status_output, csv_output, motif_plot, motif_table, plot_browser, range_plot, df_state, analysis_context_state,
@@ -1608,7 +1748,30 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
     # NCBI Range Browser Logic
     range_btn.click(
         on_range_click, 
-        inputs=[ncbi_accession, range_start, range_end, ncbi_download, ncbi_gff_download, feature_types, plot_height], 
+        inputs=[ncbi_accession, range_start, range_end, ncbi_download, ncbi_gff_download, feature_types, plot_height, highlight_ncbi, strand_ncbi], 
+        outputs=[range_plot]
+    )
+
+    # Highlight Live Updates
+    chk_highlight_main.change(
+        update_main_browser_plot,
+        inputs=[df_state, chk_highlight_main, dd_strand_main],
+        outputs=[plot_browser]
+    )
+    dd_strand_main.change(
+        update_main_browser_plot,
+        inputs=[df_state, chk_highlight_main, dd_strand_main],
+        outputs=[plot_browser]
+    )
+    
+    highlight_ncbi.change(
+        on_range_click,
+        inputs=[ncbi_accession, range_start, range_end, ncbi_download, ncbi_gff_download, feature_types, plot_height, highlight_ncbi, strand_ncbi],
+        outputs=[range_plot]
+    )
+    strand_ncbi.change(
+        on_range_click,
+        inputs=[ncbi_accession, range_start, range_end, ncbi_download, ncbi_gff_download, feature_types, plot_height, highlight_ncbi, strand_ncbi],
         outputs=[range_plot]
     )
 
