@@ -1773,7 +1773,7 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
 
 # --- UI Definition ---
 
-with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)") as demo:
+with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)", css=custom_css) as demo:
     gr.Markdown(f"# P-type PPR Prediction Program (PPPRPP) <span style='font-size: 0.5em; font-weight: normal; color: #777;'>{VERSION}</span>")
     gr.Markdown("Input your Protein sequence (to discover motifs) and RNA sequence (target) to analyze binding sites.")
     
@@ -2120,4 +2120,4 @@ if __name__ == "__main__":
     # Enable queue for long-running tasks and launch
     # Enable queue for long-running tasks and launch
     # Pass custom_css here
-    demo.queue().launch(share=False, inbrowser=True, css=custom_css)
+    demo.queue().launch(share=False, inbrowser=True)
