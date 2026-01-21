@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.1.1] - 2026-01-20
+
+### Fixed
+- **App Stability**: Pinned `gradio` version to `4.44.1` to prevent compatibility issues with newer updates (v6.x).
+- **Launch Error**: Corrected `demo.launch()` arguments to align with Gradio 4.x specifications, fixing startup crashes on some environments.
+
 ## [v0.1.0] - 2026-01-19
 
 ### Added

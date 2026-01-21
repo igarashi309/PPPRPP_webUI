@@ -26,7 +26,7 @@ os.makedirs(INPUT_DIR, exist_ok=True)
 
 TMP_DIR = OUTPUT_DIR
 
-VERSION = "v0.1.0"
+VERSION = "v0.1.1"
 
 def cleanup_temp_files():
     """Cleans up temporary files from previous runs."""
