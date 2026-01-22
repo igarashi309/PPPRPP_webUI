@@ -1,8 +1,9 @@
-gradio==4.44.1
 biopython
-plotly
-logomaker
 pandas
 numpy
+plotly
 py3Dmol
+logomaker
 matplotlib
+scipy
+gradio==6.2.0

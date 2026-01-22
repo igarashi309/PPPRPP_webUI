@@ -22,13 +22,25 @@ def get_reverse_complement(seq):
     rev_seq = "".join(complement.get(base, base) for base in reversed(seq))
     return rev_seq
 
-def generate_gap_variations(motif_labels, ppr_scores, min_front, min_back, max_gap, all_gaps=False):
+def generate_gap_variations(motif_labels, ppr_scores, min_front, min_back, max_gap, all_gaps=False, motif_types=None):
     """
     Generates variations of motif labels with gaps.
     If all_gaps is True, generates all gap sizes from 1 to max_gap.
     Otherwise (default), generates only gap 0 and max_gap (optimization).
+    Includes motif_types variation if provided.
     """
-    gap_variations = [(motif_labels, ppr_scores, 0, 0)]  # GAP 0, Pos 0
+    # Base variation
+    # Result tuple: (labels, scores, gap_size, front_size, types_variation)
+    
+    # If motif_types not provided, fill with empty strings or copy labels? 
+    # Better to keep None if not used, but tuple size must be consistent.
+    # Let's assume list of types valid if provided.
+    
+    if motif_types is None:
+        motif_types = motif_labels # Fallback/Duplicate
+        
+    base_var = (motif_labels, ppr_scores, 0, 0, motif_types)
+    gap_variations = [base_var]  # GAP 0, Pos 0
 
     target_gaps = []
     if max_gap > 0:
@@ -38,10 +50,21 @@ def generate_gap_variations(motif_labels, ppr_scores, min_front, min_back, max_g
              target_gaps = [int(max_gap)]
     
     for gap_size in target_gaps:
+        # Sliding Gap Insertion:
+        # Insert ONE block of gap_size at variable positions (front_size).
+        
+        # Valid positions for gap insertion: 
+        # min_front to len(motif_labels) - min_back
+        # e.g., if min_front=1, gap can happen after 1st motif.
+        
         for front_size in range(min_front, len(motif_labels) - min_back + 1):
-            gap_variation = motif_labels[:front_size] + ['--'] * gap_size + motif_labels[front_size:]
-            gap_scores = ppr_scores[:front_size] + [0] * gap_size + ppr_scores[front_size:]
-            gap_variations.append((gap_variation, gap_scores, gap_size, front_size))
+             gap_variation = motif_labels[:front_size] + ['--'] * gap_size + motif_labels[front_size:]
+             gap_scores = ppr_scores[:front_size] + [0] * gap_size + ppr_scores[front_size:]
+             
+             # Also gap for types
+             gap_types = motif_types[:front_size] + ['--'] * gap_size + motif_types[front_size:]
+             
+             gap_variations.append((gap_variation, gap_scores, gap_size, front_size, gap_types))
             
     return gap_variations
 
@@ -142,7 +165,7 @@ def calculate_binding_score_numpy(rna_seq, motif_binding_scores, motif_labels, p
     from numpy.lib.stride_tricks import sliding_window_view
     
     if len(seq_indices) < motif_length:
-        return []
+        return np.array([]), np.array([]), np.array([])
         
     windows = sliding_window_view(seq_indices, window_shape=motif_length)
     # windows shape: (num_windows, M)
@@ -223,6 +246,7 @@ def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_v
         "PPR_Name": [],
         "Motif_Labels": [],
         "Motif_Labels_GAP": [],
+        "Motif_Types_GAP": [], # New Column
         "Gap_Size": [],
         "Gap_Index": [],
         "Segment": [],
@@ -244,7 +268,7 @@ def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_v
     # No, we need total scores for filter. 
     
     for v_idx, variation in enumerate(motif_labels_variations):
-        motif_labels, ppr_scores_original, gap_size, gap_pos = variation
+        motif_labels, ppr_scores_original, gap_size, gap_pos, gap_types = variation
         
         # Adjust ppr_scores for calculation based on use_ps_score
         ppr_scores_for_calc = ppr_scores_original
@@ -292,6 +316,7 @@ def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_v
     out_ppr_name = []
     out_motif_labels = []
     out_motif_labels_gap = []
+    out_motif_types_gap = []
     out_gap_size = []
     out_gap_index = []
     out_segment = []
@@ -333,12 +358,13 @@ def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_v
             continue
             
         vars_tuple = res["variation"]
-        motif_labels, ppr_scores_original, gap_size, gap_pos = vars_tuple
+        motif_labels, ppr_scores_original, gap_size, gap_pos, gap_types = vars_tuple
         windows = res["windows"]
         score_matrix = res["score_matrix"]
         
         # Constant strings
         m_labels_str = ','.join(motif_labels)
+        m_types_str = ','.join(gap_types) if gap_types else ""
         
         # Extend constant columns (ALWAYS NEEDED)
         out_pos.extend(range(num_sites))
@@ -360,12 +386,14 @@ def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_v
             # Also drop constant columns repeated millions of times
             out_motif_labels.extend([""] * num_sites) 
             out_motif_labels_gap.extend([""] * num_sites)
+            out_motif_types_gap.extend([""] * num_sites)
             out_conf_scores.extend([[]] * num_sites)
             continue
             
         # Detailed Mode: Extend with actual large data
         out_motif_labels.extend([m_labels_str] * num_sites)
         out_motif_labels_gap.extend([m_labels_str] * num_sites)
+        out_motif_types_gap.extend([m_types_str] * num_sites)
         out_pred_scores_list.extend([predicted_scores] * num_sites)
         out_conf_scores.extend([ppr_scores_original] * num_sites)
         
@@ -457,6 +485,7 @@ def process_fasta_sequences(fasta_sequence, motif_binding_scores, motif_labels_v
     all_scores["PPR_Name"] = out_ppr_name
     all_scores["Motif_Labels"] = out_motif_labels
     all_scores["Motif_Labels_GAP"] = out_motif_labels_gap
+    all_scores["Motif_Types_GAP"] = out_motif_types_gap
     all_scores["Gap_Size"] = out_gap_size
     all_scores["Gap_Index"] = out_gap_index
     all_scores["Segment"] = out_segment
@@ -480,6 +509,9 @@ def analyze_ppr_data(motif_data, fasta_sequence, min_front, min_back, max_gap, p
     """
     motif_labels = motif_data['motif_labels']
     ppr_scores = motif_data['ppr_scores']
+    motif_types = motif_data.get('motif_types', []) # Get types if available
+    if not motif_types:
+        motif_types = motif_labels # Fallback
     
     scores = {}
     
@@ -496,15 +528,15 @@ def analyze_ppr_data(motif_data, fasta_sequence, min_front, min_back, max_gap, p
     
     # Kobayashi
     if should_run('kobayashi', True, 'gap0') or should_run('kobayashi', False, 'gap0'):
-        gap0_vars = [(motif_labels, ppr_scores, 0, 0)]
+        gap0_vars = [(motif_labels, ppr_scores, 0, 0, motif_types)]
     if should_run('kobayashi', True, 'varied') or should_run('kobayashi', False, 'varied'):
-        gapN_vars = generate_gap_variations(motif_labels, ppr_scores, min_front, min_back, max_gap)
+        gapN_vars = generate_gap_variations(motif_labels, ppr_scores, min_front, min_back, max_gap, motif_types=motif_types)
 
     # Yan
     if should_run('yan', True, 'gap0') or should_run('yan', False, 'gap0'):
-        gap0_vars = [(motif_labels, ppr_scores, 0, 0)]
+        gap0_vars = [(motif_labels, ppr_scores, 0, 0, motif_types)]
     if should_run('yan', True, 'varied') or should_run('yan', False, 'varied'):
-        if gapN_vars is None: gapN_vars = generate_gap_variations(motif_labels, ppr_scores, min_front, min_back, max_gap)
+        if gapN_vars is None: gapN_vars = generate_gap_variations(motif_labels, ppr_scores, min_front, min_back, max_gap, motif_types=motif_types)
 
     # Execute
     if should_run('kobayashi', True, 'gap0'):
@@ -542,7 +574,12 @@ def analyze_single_site(motif_data, rna_seq, site_pos, min_front, min_back, max_
          motif_binding_scores = YAN_BINDING_SCORES
          
     # Generate variations
-    variations = generate_gap_variations(motif_data['motif_labels'], motif_data['ppr_scores'], min_front, min_back, max_gap, all_gaps=True)
+    # Pass motif_types if available
+    motif_types = motif_data.get('motif_types', [])
+    if not motif_types:
+        motif_types = motif_data['motif_labels']
+        
+    variations = generate_gap_variations(motif_data['motif_labels'], motif_data['ppr_scores'], min_front, min_back, max_gap, all_gaps=False, motif_types=motif_types)
     
     results = []
     
@@ -552,19 +589,20 @@ def analyze_single_site(motif_data, rna_seq, site_pos, min_front, min_back, max_
         ppr_scores_for_calc = [1.0] * len(motif_data['motif_labels'])
         
     # Re-generate variations with correct calc scores
-    calc_variations = generate_gap_variations(motif_data['motif_labels'], ppr_scores_for_calc, min_front, min_back, max_gap, all_gaps=True)
+    calc_variations = generate_gap_variations(motif_data['motif_labels'], ppr_scores_for_calc, min_front, min_back, max_gap, all_gaps=False, motif_types=motif_types)
     
     seq_len = len(rna_seq)
     
     # Iterate both lists (they are aligned)
     for (v_orig, v_calc) in zip(variations, calc_variations):
-        # v_orig: (labels, original_scores, gap_size, front_size)
-        # v_calc: (labels, calc_scores, gap_size, front_size)
+        # v_orig: (labels, original_scores, gap_size, front_size, types_variation)
+        # v_calc: (labels, calc_scores, gap_size, front_size, types_variation)
         
         m_labels = v_calc[0]
         m_scores_calc = v_calc[1]
         gap_size = v_calc[2]
         front_size = v_calc[3] # Index of gap start
+        m_types = v_calc[4] # Types
         
         motif_len = len(m_labels)
         
@@ -598,6 +636,13 @@ def analyze_single_site(motif_data, rna_seq, site_pos, min_front, min_back, max_
         
         base_scores_vec = base_score_matrix[seq_range, col_indices]
         
+        # Apply weighting from m_scores_calc (contains confidence or 1.0 depending on use_ps_score)
+        # m_scores_calc corresponds to motifs in m_labels.
+        # We need to map it to the sequence length? No, m_scores_calc is length M.
+        # base_scores_vec is length M.
+        
+        weighted_scores_vec = base_scores_vec * np.array(m_scores_calc, dtype=np.float32)
+        
         # Original confidence scores (for display)
         conf_scores_gap = v_orig[1]
         
@@ -606,20 +651,18 @@ def analyze_single_site(motif_data, rna_seq, site_pos, min_front, min_back, max_
         ppr_motif_scores = [] 
         if pred_scores_list:
              limit = min(motif_len, len(pred_scores_list))
-             weighted = base_scores_vec[:limit] * np.array(pred_scores_list[:limit], dtype=np.float32)
+             weighted = weighted_scores_vec[:limit] * np.array(pred_scores_list[:limit], dtype=np.float32)
              ppr_motif_scores = weighted.tolist()
              
-        # Gap Index in dataframe terminology (position of gap in motif)
-        # Is Gap_Index used for anything? Logic says "Gap_Index" is front_size.
-        
         row = {
             "Gap_Index": front_size,
             "Gap_Size": gap_size,
             "Total_Score": score, # Weighted if use_ps_score
-            "PPR_Binding_Score": score if use_ps_score else float(np.sum(base_scores_vec)),
+            "PPR_Binding_Score": score, # Consistency: Use the calculated score (weighted/unweighted)
             "Motif_Labels_GAP": ','.join(m_labels),
+            "Motif_Types_GAP": ','.join(m_types), # Pass Types
             "Segment": sub_seq,
-            "PPR_Binding_Scores_List": base_scores_vec.tolist(),
+            "PPR_Binding_Scores_List": weighted_scores_vec.tolist(),
             "Motif_Confidence_Scores": conf_scores_gap,
             "PPR_Motif_Scores": ppr_motif_scores,
             "Predicted PPR Motif Scores List": pred_scores_list
