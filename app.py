@@ -1244,14 +1244,14 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis", highlig
     
     return fig
 
-def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_types=None, plot_height=500, highlight_top=False, highlight_strand="Both", analysis_context=None):
+def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types=["gene"], plot_height=600, highlight_top=False, highlight_strand="Both", analysis_context=None, protein_name=None):
     """Plots binding scores and gene annotations for a specific range.
        If analysis_context is provided and range is small (<50kb), it optionally re-calculates 
        to show ALL sites (ignoring truncation).
     """
     # Extract analysis type from DF
     analysis_type = "Analysis"
-    if 'Analysis_Type' in df.columns and not df.empty:
+    if df is not None and not df.empty and 'Analysis_Type' in df.columns:
         analysis_type = df['Analysis_Type'].iloc[0]
     
     readable_condition = parse_analysis_type(analysis_type)
@@ -1605,9 +1605,17 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Sequence", feature_type
             
     # Add title with conditions
     import time
+
+    # Construct Title
+    # Format: [ProteinName] Range Start-End (SeqID)
+    prot_str = f"[{protein_name}] " if protein_name else ""
+    seq_str = f"({seq_id})" if seq_id else ""
+    
+    title_main = f"<b>{prot_str}Range {start}-{end} {seq_str}</b>"
+
     fig.update_layout(
         title=dict(
-            text=f"<b>Range {start}-{end} ({seq_id})</b><br><sup>Method: {readable_condition}{recalc_msg}</sup>",
+            text=f"{title_main}<br><sup>Method: {readable_condition}{recalc_msg}</sup>",
             y=0.95,
             x=0.5,
             xanchor='center',
@@ -2834,7 +2842,8 @@ def run_dispatch_wrapper(
                 plot_height=plot_height, 
                 highlight_top=highlight_top, 
                 highlight_strand=highlight_strand,
-                analysis_context={} # Disable internal re-calc (we already calculated exact range)
+                analysis_context={}, # Disable internal re-calc (we already calculated exact range)
+                protein_name=job_name
             )
             
             status += f"\n{res_msg}"
@@ -3098,7 +3107,7 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)", css=custom_css) a
     # The user can manually enter Position from Plotly hover tooltips and click "Inspect Site".
     
     # Live Browser Updates (Highlight/Strand/Height)
-    def update_browser_view(df, highlight, strand, height, context, accession, mode, gff_file, r_start, r_end, feats):
+    def update_browser_view(df, highlight, strand, height, context, accession, mode, gff_file, r_start, r_end, feats, job_name):
         # We need to know if we are in Manual (Full) or NCBI (Range/Slice) mode to call correct plotter.
         # But `df` in state is always Standardized (Manual has 0-based, NCBI has Absolute).
         # Wait, My NCBI fix Shifted df to Absolute.
@@ -3123,7 +3132,8 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)", css=custom_css) a
                 plot_height=height, 
                 highlight_top=highlight, 
                 highlight_strand=strand,
-                analysis_context={} # Disable recalc
+                analysis_context={}, # Disable recalc
+                protein_name=job_name
              )
         else:
              # Manual Mode -> Use Genome Browser
@@ -3148,7 +3158,7 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)", css=custom_css) a
 
     view_inputs = [
         df_state, chk_highlight, dd_strand, plot_height, analysis_context_state, 
-        ncbi_accession, mode_select, ncbi_gff_down, range_start, range_end, feature_radio
+        ncbi_accession, mode_select, ncbi_gff_down, range_start, range_end, feature_radio, job_name_input
     ]
     
     chk_highlight.change(update_view_wrapper, inputs=view_inputs, outputs=[plot_browser])
