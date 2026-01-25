@@ -48,3 +48,52 @@ The application will open automatically in your default web browser.
     -   **Mac**: `brew install hmmer`
     -   **Linux/WSL**: `sudo apt install hmmer`
 - **Browser doesn't open**: Look for a URL in the console output (e.g., `http://127.0.0.1:7860`) and open it manually.
+
+## Basic Usage
+
+### 1. Inputs (Tab 1: Inputs)
+This tab is for preparing your data.
+
+1.  **Protein Input**: 
+    - Enter the Protein Sequence (FASTA format) or upload a file. This sequence is used for Motif Discovery.
+2.  **Input Mode**: Select how you want to provide the Target RNA.
+    - **Manual Sequence**: Paste an RNA sequence directly.
+    - **NCBI Accession**: Enter an NCBI ID (e.g., `AP017386`) to automatically fetch the FASTA and Annotation (GFF3).
+3.  **Custom Annotations** (Optional):
+    - You can manually add gene information (Name, Type, Start, End, Strand) to be displayed in the analysis.
+    - Click **"Save (GFF3)"** to save your custom genes.
+4.  **Preview & Features**:
+    - **Preview Genes**: Visualize the features (Genes, CDS, etc.) in the specified range.
+    - **Range**: Enter Start/End to zoom in. Leave empty or 0 to view the whole sequence (in Manual Mode).
+    - **Feature Types**: Select which feature types to display (e.g., `gene`, `CDS`, `other`).
+
+### 2. Analysis (Tab 2: Settings & Run)
+Configure the analysis parameters.
+
+1.  **Tool Selection**: Choose the analysis algorithm (e.g., `Kobayashi 2000`, `Yan 2019`).
+2.  **Parameters**:
+    - **Max Gap Size**: Set the maximum gap size to consider (e.g., 3).
+    - **Scoring**: Enable/Disable P-S Score usage.
+3.  **Visual Settings**:
+    - **Plot Height**: Adjust the height of the result genome browser.
+    - **Highlight Scores**: Option to highlight the top-scoring binding site.
+4.  **Run**:
+    - Enter a Job Name (optional).
+    - Click **"Run Analysis"**.
+
+### 3. Results (Tab 3: Results)
+View the analysis output.
+
+- **Status Log**: Shows progress and key statistics.
+- **PPR Motif Plot**: Visualizes the discovered PPR motifs and their amino acids.
+- **Genome Browser**:
+    - Interactive plot showing binding scores across the RNA sequence.
+    - Displays gene annotations (from NCBI or Custom).
+    - Click on any point to inspect detailed binding info.
+- **Detailed Inspection**:
+    - Shows the specific alignment between the PPR motifs and the RNA sequence at the clicked position.
+- **Downloads**:
+    - Download the results as CSV, BedGraph, BED, or Reference FASTA/GFF.
+
+### 4. File Management
+- Use the **"📂 Input Folder"** and **"📂 Output Folder"** buttons at the top right to quickly open the data directories on your computer.
