@@ -13,6 +13,8 @@ import glob
 from Bio import SeqIO
 import io
 import shutil
+import subprocess
+import platform
 
 # --- Constants ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -26,7 +28,7 @@ os.makedirs(INPUT_DIR, exist_ok=True)
 
 TMP_DIR = OUTPUT_DIR
 
-VERSION = "v0.1.2"
+VERSION = "v0.1.3"
 
 def cleanup_temp_files():
     """Cleans up temporary files from previous runs."""
@@ -43,6 +45,23 @@ def cleanup_temp_files():
     #             print(f"Error deleting {f}: {e}")
     # if count > 0:
     #     print(f"Cleaned up {count} temporary files.")
+
+def open_folder(path):
+    """Opens a folder in the system file explorer."""
+    if not os.path.exists(path):
+        return f"Path not found: {path}"
+    
+    try:
+        system = platform.system()
+        if system == "Darwin": # macOS
+            subprocess.run(["open", path])
+        elif system == "Windows":
+            os.startfile(path)
+        elif system == "Linux":
+            subprocess.run(["xdg-open", path])
+        return f"Opened: {path}"
+    except Exception as e:
+        return f"Error opening folder: {e}"
 
 # Import package modules
 from ppr_analysis import core, io as ppr_io, visualization, config, motif_generation, ncbi
@@ -2699,6 +2718,155 @@ def run_ncbi_analysis(accession_id, protein_text, protein_file, tool_choice, sco
     
     yield make_output("Done", fasta=fasta_path, bedgraph=bedgraph_path, bed=bed_path, csv=csv_path, gff=gff3_path)
 
+def open_input_folder():
+    return open_folder(INPUT_DIR)
+
+def open_output_folder():
+    return open_folder(OUTPUT_DIR)
+
+def save_custom_gff(df):
+    """Saves the custom genes dataframe to a GFF3 file."""
+    if df is None or df.empty:
+        return "No data to save."
+    
+    # Validate columns
+    required = ["Name", "Type", "Start", "End", "Strand"]
+    if not all(col in df.columns for col in required):
+        # Fallback for old dataframe version?
+        # Normalize if "Type" missing?
+        if "Type" not in df.columns and "Name" in df.columns:
+             df["Type"] = "gene" # Backwards compat
+        elif not all(col in df.columns for col in ["Name", "Start", "End", "Strand"]):
+             return "Error: Missing columns in table."
+        
+    out_path = os.path.join(INPUT_DIR, "custom_annotations.gff3")
+    
+    try:
+        with open(out_path, "w") as f:
+            f.write("##gff-version 3\n")
+            for _, row in df.iterrows():
+                # GFF3: seqid source type start end score strand phase attributes
+                # We use "Custom" as seqid placeholder or match target?
+                # If merging, seqid should match target ID ideally.
+                # But typically visualization tools ignore seqid if we force load?
+                # Let's use "." or "Target". 
+                
+                name = str(row["Name"])
+                f_type = str(row["Type"]) if "Type" in row and row["Type"] else "gene"
+                start = str(int(row["Start"]))
+                end = str(int(row["End"]))
+                strand = str(row["Strand"])
+                
+                # Attributes
+                attr = f"ID={name};Name={name}"
+                
+                line = f".\tCustom\t{f_type}\t{start}\t{end}\t.\t{strand}\t.\t{attr}\n"
+                f.write(line)
+        return f"Saved to {os.path.basename(out_path)}"
+    except Exception as e:
+        return f"Error saving GFF: {e}"
+
+def create_merged_gff(base_gff_path, custom_df, seq_id):
+    """
+    Creates a temporary GFF3 file merging base GFF and Custom Annotations.
+    """
+    import tempfile
+    
+    # If no custom data, just return base
+    if custom_df is None or custom_df.empty:
+        return base_gff_path
+        
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".gff3") as tmp_gff:
+        # Copy base GFF content if exists
+        if base_gff_path and os.path.exists(base_gff_path):
+            with open(base_gff_path, "r") as f_in:
+                tmp_gff.write(f_in.read())
+                # Ensure newline
+                # if not base_gff_path.endswith("\n"): 
+                # Reading file content doesn't give filename property.
+                # Just add newline to be safe
+                tmp_gff.write("\n")
+        else:
+            tmp_gff.write("##gff-version 3\n")
+            
+        # Append Custom Genes
+        for _, row in custom_df.iterrows():
+            try:
+                name = str(row["Name"])
+                f_type = str(row["Type"]) if "Type" in row and row["Type"] else "gene"
+                s = int(row["Start"])
+                e = int(row["End"])
+                st = str(row["Strand"])
+                
+                # Use seq_id matches target
+                attr = f"ID={name};Name={name}"
+                
+                # Logic: If NCBI Mode, seq_id is e.g. "AP017386".
+                # If Manual Mode, seq_id is "Manual" or "."?
+                # Plotters might filter by ID. 
+                # Let's trust the passed seq_id.
+                eff_id = seq_id if seq_id else "."
+                
+                line = f"{eff_id}\tCustom\t{f_type}\t{s}\t{e}\t.\t{st}\t.\t{attr}\n"
+                tmp_gff.write(line)
+            except:
+                continue
+                
+    return tmp_gff.name
+
+def preview_genes_wrapper(mode, rna_text, ncbi_gff, start, end, feature_type, acc_id, custom_df):
+    """
+    Unified Preview Logic handling both Manual and NCBI modes + Custom Annotations.
+    """
+    import tempfile
+    
+    # 1. Determine Sequence Length and Context
+    seq_len = 50000 # Default fallback
+    effective_start = 1
+    effective_end = seq_len
+    effective_id = "Manual"
+    
+    base_gff_path = None
+    
+    if mode == "NCBI Accession":
+        if not ncbi_gff:
+            return go.Figure(layout=dict(title="Fetch data first for NCBI Mode"))
+        base_gff_path = ncbi_gff.name
+        effective_start = int(start) if start else 1
+        effective_end = int(end) if end else 1000
+        effective_id = acc_id
+    else:
+        # Manual Mode
+        # Use provided range if available, else seq len
+        if rna_text:
+            # Clean and estimate length
+            clean_seq = "".join(rna_text.splitlines()[1:]).replace(" ", "").strip() if ">" in rna_text else rna_text.replace(" ", "").strip()
+            seq_len = len(clean_seq) if clean_seq else 1000
+        else:
+            seq_len = 1000
+            
+        if start and end and (end > start):
+             effective_start = int(start)
+             effective_end = int(end)
+        else:
+             effective_start = 1
+             effective_end = seq_len
+            
+    # 2. Handle Custom Annotations (Merge Logic)
+    merged_gff_path = create_merged_gff(base_gff_path, custom_df, effective_id)
+            
+    if not merged_gff_path or not os.path.exists(merged_gff_path):
+         # If no data, and we are in manual mode with no custom genes, we might have no GFF.
+         # plot_genes_only handles None gff by plotting nothing?
+         pass
+         
+    try:
+        # Call Plotter
+        fig = visualization.plot_genes_only(merged_gff_path, effective_start, effective_end, effective_id, feature_type)
+        return fig
+    except Exception as e:
+        return go.Figure(layout=dict(title=f"Preview Error: {e}"))
+
 def run_dispatch_wrapper(
     mode_select,
     # Manual Inputs
@@ -2709,7 +2877,8 @@ def run_dispatch_wrapper(
     tool_select, scoring_method, max_gap_size, use_ps_score, job_name,
     # Features
     feature_types, plot_height, highlight_top, highlight_strand,
-    log_state=None # Add log_state
+    log_state=None, # Add log_state
+    custom_gene_df=None # Add custom_gene_df
 ):
     """
     Unified Dispatcher. Routes request to appropriate logic and normalizes output.
@@ -2717,10 +2886,11 @@ def run_dispatch_wrapper(
     [status, csv, motif_plot, motif_df, browser_plot, detail_plot (dummy), df_state, context_state, log_out]
     """
     # Normalize feature_types (Radio returns string, CheckboxGroup returned list)
+    # Normalize feature_types (Radio returns string, CheckboxGroup returned list)
     if isinstance(feature_types, str):
         feature_types = [feature_types]
-    elif feature_types is None:
-        feature_types = ["gene"]
+    elif feature_types is None or len(feature_types) == 0:
+        feature_types = ["gene"] # Fallback default
 
     import pandas as pd
     import time
@@ -2833,10 +3003,12 @@ def run_dispatch_wrapper(
             _log("Rendering Range Browser...")
             yield _yield()
             
-            gff_path_val = ncbi_gff_down.name if ncbi_gff_down else None
+            # Merge GFF if needed (NCBI GFF + Custom)
+            base_gff_path = ncbi_gff_down.name if ncbi_gff_down else None
+            merged_gff = create_merged_gff(base_gff_path, custom_gene_df, ncbi_accession)
             
             browser_fig = plot_range_browser(
-                df_out, gff_path_val, r_start, r_end, 
+                df_out, merged_gff, r_start, r_end, 
                 seq_id=ncbi_accession, 
                 feature_types=feature_types,
                 plot_height=plot_height, 
@@ -2876,8 +3048,28 @@ def run_dispatch_wrapper(
             # Unpack
             (status, csv, motif_fig, motif_df, browser_fig_orig, _, df_out, context_out, _, _) = res_tuple
             
-            # Let's keep browser_fig_orig for now as it's correctly formatted for full genome.
-            browser_fig = browser_fig_orig
+            # For Manual Mode, we also want to show Custom Annotations.
+            # We override browser_fig_orig (which uses plot_genome_browser without GFF) 
+            # with plot_range_browser using the custom GFF.
+            
+            _log("Rendering Browser with Custom Annotations...")
+            if df_out is not None and not df_out.empty:
+                max_pos = int(df_out['Genome_Position'].max())
+                # Create GFF from Custom DF
+                merged_gff = create_merged_gff(None, custom_gene_df, "Manual")
+                
+                browser_fig = plot_range_browser(
+                    df_out, merged_gff, 0, max_pos + 100, 
+                    seq_id="Target RNA", 
+                    feature_types=["gene"], # Default showing genes
+                    plot_height=plot_height, 
+                    highlight_top=highlight_top, 
+                    highlight_strand=highlight_strand,
+                    analysis_context={},
+                    protein_name=job_name
+                )
+            else:
+                browser_fig = browser_fig_orig
             
             elapsed = time.time() - start_time
             _log(f"Analysis Complete in {elapsed:.1f}s")
@@ -2903,7 +3095,11 @@ from gradio.themes import Default
 from gradio.themes import Default
 
 with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)", css=custom_css) as demo:
-    gr.Markdown(f"# P-type PPR Prediction Program (PPPRPP) <span style='font-size: 0.5em; font-weight: normal; color: #777;'>{VERSION}</span>")
+    with gr.Row():
+        gr.Markdown(f"# P-type PPR Prediction Program (PPPRPP) <span style='font-size: 0.5em; font-weight: normal; color: #777;'>{VERSION}</span>")
+        with gr.Row(): # Buttons aligned right-ish
+             btn_open_in = gr.Button("📂 Input Folder", size="sm", scale=0)
+             btn_open_out = gr.Button("📂 Output Folder", size="sm", scale=0)
     
     # State
     df_state = gr.State()
@@ -2927,7 +3123,7 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)", css=custom_css) a
             with gr.Row():
                 prot_text = gr.Textbox(label="Protein FASTA Sequence", lines=5, placeholder=f">PPR791(Rf1a)_IR24\\n{DEFAULT_PROTEIN[:50]}...", scale=3)
                 prot_file = gr.File(label="Upload Protein File", scale=1)
-            
+
             gr.Markdown("### Target RNA Input")
             mode_select = gr.Radio(["Manual Sequence", "NCBI Accession"], value="Manual Sequence", label="Input Mode")
             
@@ -2946,25 +3142,41 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)", css=custom_css) a
                 # Fetch Status (Immediate)
                 input_status_log = gr.Textbox(label="Fetch Status", lines=1, interactive=False)
                 
-                # Hidden Stores
-                ncbi_fasta_down = gr.File(label="Ref FASTA", visible=False)
-                ncbi_gff_down = gr.File(label="Ref GFF3", visible=False)
-                
-                gr.Markdown("#### Range Selection & Preview")
+            # Hidden Stores (Shared context)
+            ncbi_fasta_down = gr.File(label="Ref FASTA", visible=False)
+            ncbi_gff_down = gr.File(label="Ref GFF3", visible=False)
+            
+            gr.Markdown("#### Preview & Features")
+            # Custom & Range Preview Shared Block
+            with gr.Group():
                 with gr.Row():
-                     range_start = gr.Number(label="Start", value=133162, precision=0)
-                     range_end = gr.Number(label="End", value=134622, precision=0)
-                     preview_btn = gr.Button("Preview Genes", variant="secondary")
+                     with gr.Column(scale=2):
+                         gr.Markdown("**Custom Annotations** (Name, Type, Start, End, Strand)")
+                         custom_gene_df = gr.DataFrame(
+                            headers=["Name", "Type", "Start", "End", "Strand"],
+                            datatype=["str", "str", "number", "number", "str"],
+                            col_count=(5, "fixed"),
+                            label="Custom Genes Table",
+                            interactive=True,
+                            value=[["MyGene", "gene", 100, 500, "+"]] # Example row with Type
+                        )
+                         btn_save_custom = gr.Button("Save (GFF3)", size="sm")
+                         save_status = gr.Textbox(show_label=False, interactive=False)
+                         
+                     with gr.Column(scale=1):
+                         gr.Markdown("**Preview Settings**")
+                         with gr.Row():
+                             range_start = gr.Number(label="Start", value=133162, precision=0)
+                             range_end = gr.Number(label="End", value=134622, precision=0)
+                         preview_btn = gr.Button("Preview Genes", variant="secondary")
+                         feature_radio = gr.CheckboxGroup(
+                             ["gene", "CDS", "tRNA", "rRNA", "exon", "other"], 
+                             value=["gene", "other"], 
+                             label="Preview Feature Types"
+                         )
                 
-                with gr.Accordion("Features & Options", open=True): # Open by default
-                     feature_radio = gr.Radio(
-                         ["gene", "CDS", "tRNA", "rRNA", "exon"], 
-                         value="gene", 
-                         label="Preview Feature Type"
-                     )
-                     
-                # Gene Preview Plot
-                preview_plot = gr.Plot(label="Range Preview", container=True, show_label=False)
+            # Gene Preview Plot
+            preview_plot = gr.Plot(label="Range Preview", container=True, show_label=False)
 
         # --- Tab 2: Settings & Run ---
         with gr.Tab("2. Settings & Run", id="tab_settings"):
@@ -3028,6 +3240,17 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)", css=custom_css) a
 
     # --- Event Logic ---
     
+    # Open Folder Buttons
+    btn_open_in.click(open_input_folder)
+    btn_open_out.click(open_output_folder)
+    
+    # Save Custom GFF
+    btn_save_custom.click(
+        save_custom_gff,
+        inputs=[custom_gene_df],
+        outputs=[save_status]
+    )
+    
     # Mode Switch
     def toggle_mode(mode):
         return {
@@ -3044,19 +3267,10 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)", css=custom_css) a
         outputs=[input_status_log, ncbi_fasta_down, ncbi_gff_down]
     )
     
-    # NCBI Preview
-    def preview_genes(gff_file, start, end, feature_type, acc_id):
-        if not gff_file or not start or not end:
-            return go.Figure(layout=dict(title="Fetch data and set range first"))
-        
-        # Call plot_genes_only
-        # feature_type is now a single string from Radio
-        fig = plot_genes_only(gff_file.name, int(start), int(end), acc_id, feature_type)
-        return fig
-
+    # NCBI Preview (Refactored to Unified Preview)
     preview_btn.click(
-        preview_genes,
-        inputs=[ncbi_gff_down, range_start, range_end, feature_radio, ncbi_accession], # Use feature_radio
+        preview_genes_wrapper,
+        inputs=[mode_select, rna_text, ncbi_gff_down, range_start, range_end, feature_radio, ncbi_accession, custom_gene_df],
         outputs=[preview_plot]
     )
 
@@ -3070,7 +3284,8 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)", css=custom_css) a
              ncbi_accession, range_start, range_end, ncbi_fasta_down, ncbi_gff_down,
              tool_select, scoring_method, range_max_gap, use_ps_score, job_name_input,
              feature_radio, plot_height, chk_highlight, dd_strand,
-             log_state # Pass log state input
+             log_state, # Pass log state input
+             custom_gene_df # Pass custom genes
         ],
         outputs=[
              terminal_log, csv_output, motif_plot, motif_table, 

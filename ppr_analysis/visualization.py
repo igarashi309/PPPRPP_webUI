@@ -244,3 +244,159 @@ def plot_combined_top_logos(top_motif_labels, binding_dict_for_logo, top_segment
     fig.suptitle(f"Combined Top Score Logos", fontsize=12)
     plt.tight_layout(rect=[0, 0, 1, 1])
     plt.show()
+
+def plot_genes_only(gff_path, start, end, title_id="Sequence", feature_type="gene"):
+    """
+    Plots only the gene annotations within a range using Plotly.
+    """
+    from . import ncbi
+    import plotly.graph_objects as go
+    import os
+    
+    fig = go.Figure()
+    
+    # Base line
+    fig.add_trace(go.Scatter(
+        x=[start, end], y=[0, 0], 
+        mode='lines', line=dict(color='gray', width=1), 
+        showlegend=False, hoverinfo='skip'
+    ))
+    
+    if not gff_path or not os.path.exists(gff_path):
+        fig.update_layout(title=f"No GFF file found for {title_id}")
+        return fig
+        
+    # Parse GFF
+    # Assuming ncbi.parse_gff is available and works
+    try:
+        features = ncbi.parse_gff(gff_path, start, end)
+    except Exception as e:
+        fig.update_layout(title=f"Error parsing GFF: {e}")
+        return fig
+        
+    # Filter features
+    # Support single string or list
+    types_to_show = feature_type if isinstance(feature_type, list) else [feature_type]
+    
+    # Standard types usually have dedicated colors
+    STANDARD_TYPES = ["gene", "CDS", "tRNA", "rRNA", "exon"]
+    
+    # Constants for plotting
+    gene_y_fwd = 0.5
+    gene_y_rev = -0.5
+    thickness = 0.4
+    half_thick = thickness / 2
+    
+    # Arrow head size
+    view_width = end - start
+    if view_width <= 0: view_width = 100
+    head_len = view_width * 0.015 # 1.5% of view
+    
+    annotations = []
+    
+    for feat in features:
+        f_type = feat['type']
+        
+        # Filtering Logic
+        show_it = False
+        if f_type in types_to_show:
+            show_it = True
+        elif "other" in types_to_show:
+            if f_type not in STANDARD_TYPES:
+                show_it = True
+        
+        if not show_it:
+            continue
+            
+        f_start = max(start, feat['start'])
+        f_end = min(end, feat['end'])
+        
+        # Skip if out of view (parse_gff might return overlaps)
+        if f_end < start or f_start > end:
+            continue
+            
+        f_strand = feat['strand']
+        
+        # Name
+        attrs = feat.get('attributes', {})
+        f_name = attrs.get('Name', attrs.get('gene', attrs.get('ID', f_type)))
+        
+        # Color
+        if f_type == 'CDS': color = 'orange'
+        elif f_type == 'tRNA': color = 'green'
+        elif f_type == 'rRNA': color = 'purple'
+        elif f_type == 'gene': color = 'blue'
+        elif f_type == 'exon': color = 'cornflowerblue'
+        else: color = 'gray' # Default for 'other'
+        
+        y_pos = gene_y_fwd if f_strand == '+' else gene_y_rev
+        
+        # Draw Arrow Shape using Scatter Fill
+        # Points: Start,Top -> HeadBase,Top -> Tip,Mid -> HeadBase,Bot -> Start,Bot
+        
+        # Adjust lengths for aesthetic arrow
+        draw_start = f_start
+        draw_end = f_end
+        
+        # Ensure minimum visibility
+        if draw_end - draw_start < view_width * 0.001:
+             draw_end = draw_start + view_width * 0.001
+        
+        h_len = min(head_len, draw_end - draw_start)
+        
+        y_top = y_pos + half_thick
+        y_bot = y_pos - half_thick
+        y_mid = y_pos
+        
+        if f_strand == '+':
+            x_tip = draw_end
+            x_base = draw_end - h_len
+            x_tail = draw_start
+            
+            x_pts = [x_tail, x_base, x_tip, x_base, x_tail, x_tail]
+            y_pts = [y_top, y_top, y_mid, y_bot, y_bot, y_top]
+        else:
+            x_tip = draw_start
+            x_base = draw_start + h_len
+            x_tail = draw_end
+            
+            x_pts = [x_tail, x_base, x_tip, x_base, x_tail, x_tail]
+            y_pts = [y_top, y_top, y_mid, y_bot, y_bot, y_top]
+            
+        fig.add_trace(go.Scatter(
+            x=x_pts, y=y_pts,
+            fill="toself",
+            mode='lines',
+            line=dict(width=1, color='black'),
+            fillcolor=color,
+            name=f"{f_name} ({f_strand})",
+            hoverinfo='text',
+            hovertext=f"{f_name}<br>{f_type}<br>{f_start}-{f_end} ({f_strand})"
+        ))
+        
+        # Label (Centered)
+        label_x = (draw_start + draw_end) / 2
+        annotations.append(dict(
+            x=label_x, y=y_pos,
+            text=f_name,
+            showarrow=False,
+            font=dict(color='white' if f_type in ['gene', 'CDS'] else 'black', size=10),
+            bgcolor=None # Transparent background inside colored arrow
+        ))
+        
+    fig.update_layout(
+        title=f"Sequence Features: {title_id} ({start}-{end})",
+        yaxis=dict(
+            range=[-1.5, 1.5], 
+            showgrid=False, 
+            zeroline=False, 
+            showticklabels=False,
+            title="Strand (+ / -)"
+        ),
+        xaxis=dict(title="Position", range=[start, end]),
+        height=300,
+        annotations=annotations,
+        showlegend=False
+    )
+    
+    return fig
