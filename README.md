@@ -97,3 +97,8 @@ View the analysis output.
 
 ### 4. File Management
 - Use the **"📂 Input Folder"** and **"📂 Output Folder"** buttons at the top right to quickly open the data directories on your computer.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
