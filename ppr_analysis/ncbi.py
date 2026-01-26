@@ -163,9 +163,9 @@ def parse_gff(gff_path, start, end):
                     continue
                     
                 f_type = parts[2]
-                # Filter for relevant types
-                if f_type not in ["gene", "CDS", "tRNA", "rRNA", "exon"]:
-                    continue
+                # Filter for relevant types - RELAXED for multi-select
+                # if f_type not in ["gene", "CDS", "tRNA", "rRNA", "exon"]:
+                #     continue
                     
                 f_strand = parts[6]
                 attributes_str = parts[8]

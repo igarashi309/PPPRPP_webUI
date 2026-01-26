@@ -20,9 +20,17 @@ venv/
 .vscode/
 
 # Analysis Output Files
+# Removed explicit *.csv/*.fasta as we want to control them via data folders
+# But keeping them is fine for root clutter
 *.csv
 *.fasta
 *.bedgraph
 *.bed
 *.gff3
 temp/
+
+# Data Directories
+data/input/*
+!data/input/.gitkeep
+data/output/*
+!data/output/.gitkeep

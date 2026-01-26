@@ -1,5 +1,23 @@
 # Changelog
 
+## [v0.1.1] - 2026-01-20
+
+### Fixed
+- **App Stability**: Pinned `gradio` version to `4.44.1` to prevent compatibility issues with newer updates (v6.x).
+- **Launch Error**: Corrected `demo.launch()` arguments to align with Gradio 4.x specifications, fixing startup crashes on some environments.
+
+## [v0.1.0] - 2026-01-19
+
+### Added
+- **Interactive Gap Selection**: In "Inspect Specific Site", users can now see all alignment variations (different gap sizes and positions) for a specific site. The dropdown allows switching between them instantly.
+- **RNA Sequence Support**: All inputs (Sequence Text, FASTA files) are now automatically normalized to Uppercase RNA (U-notation), allowing flexible input of DNA/RNA mixed sequences.
+- **RNA Display**: Detail Inspector and plots now consistently display sequences using RNA notation (U).
+
+### Changed
+- **UX Improvement**: "Alignment Variation" dropdown is now always visible, making the feature more discoverable.
+- **Robustness**: Fixed data type issues preventing "Inspect Specific Site" from working in Lite Mode context.
+- **Stability**: Fixed a startup crash caused by incorrect State initialization order.
+
 ## [v0.0.8] - 2026-01-09
 
 ### Changed
