@@ -4,6 +4,7 @@ import shutil
 import urllib.request
 import tarfile
 import sys
+import re
 from pathlib import Path
 from Bio import SeqIO
 
@@ -28,6 +29,89 @@ def check_dependencies():
         "hmmsearch": shutil.which("hmmsearch") is not None
     }
     return dependencies
+
+def _parse_java_major(version_text):
+    """
+    Parses java major version from `java -version` output.
+    Returns int (e.g., 8, 11, 17) or None.
+    """
+    if not version_text:
+        return None
+    m = re.search(r'version\s+"([^"]+)"', version_text)
+    if not m:
+        return None
+    raw = m.group(1)
+    if raw.startswith("1."):
+        parts = raw.split(".")
+        if len(parts) >= 2 and parts[1].isdigit():
+            return int(parts[1])
+        return None
+    major = raw.split(".", 1)[0]
+    return int(major) if major.isdigit() else None
+
+def _get_java_major(java_bin):
+    """Returns detected major version for a java binary, else None."""
+    try:
+        proc = subprocess.run(
+            [java_bin, "-version"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        text = (proc.stderr or "") + "\n" + (proc.stdout or "")
+        return _parse_java_major(text)
+    except Exception:
+        return None
+
+def find_java_runtime(min_major=17):
+    """
+    Finds a Java runtime with major version >= min_major.
+    Returns: (java_bin_or_none, detected_list[(path, major), ...])
+    """
+    candidates = []
+
+    # Explicit override first
+    env_java = os.environ.get("PPRFINDER_JAVA")
+    if env_java:
+        candidates.append(env_java)
+
+    # JAVA_HOME hint
+    java_home = os.environ.get("JAVA_HOME")
+    if java_home:
+        candidates.append(str(Path(java_home) / "bin" / "java"))
+
+    # PATH candidates
+    candidates.append(shutil.which("java"))
+    candidates.append(shutil.which("java17"))
+
+    # Common install locations (macOS/Linux)
+    common_paths = [
+        "/opt/homebrew/opt/openjdk@17/bin/java",
+        "/usr/local/opt/openjdk@17/bin/java",
+        "/usr/lib/jvm/java-17-openjdk-amd64/bin/java",
+        "/usr/lib/jvm/java-17-openjdk/bin/java",
+    ]
+    candidates.extend(common_paths)
+
+    detected = []
+    seen = set()
+    for c in candidates:
+        if not c:
+            continue
+        c = str(Path(c))
+        if c in seen:
+            continue
+        seen.add(c)
+        if not Path(c).exists():
+            continue
+        major = _get_java_major(c)
+        if major is None:
+            continue
+        detected.append((c, major))
+        if major >= min_major:
+            return c, detected
+
+    return None, detected
 
 def download_file(url, dest_path):
     """Downloads a file if it doesn't exist."""
@@ -104,6 +188,8 @@ def run_pprfinder(protein_fasta, output_dir):
     profiles_dir = DATA_DIR / "profiles"
     pprfinder_jar = bin_dir / "PPRfinder.jar"
     all_ppr_hmm = profiles_dir / "all_PPR.hmm"
+    if not pprfinder_jar.exists():
+        raise RuntimeError(f"PPRFinder.jar not found: {pprfinder_jar}")
     
     # Create output dir
     if not os.path.exists(output_dir):
@@ -127,18 +213,24 @@ def run_pprfinder(protein_fasta, output_dir):
     print(f"Running: {' '.join(cmd_hmm)}")
     subprocess.run(cmd_hmm, check=True)
     
-    # 2. Run PPRFinder (Python implementation)
-    # cmd_java = ["java", "-jar", str(pprfinder_jar), protein_fasta, str(hmm_out)]
-    
-    print(f"Running PPRFinder (Python) on {hmm_out}...")
-    
+    # 2. Run Java PPRFinder to keep output identical to the reference implementation
+    java_bin, detected = find_java_runtime(min_major=17)
+    if not java_bin:
+        detected_str = ", ".join(f"{p} (Java {m})" for p, m in detected) if detected else "none"
+        raise RuntimeError(
+            "Java 17+ is required for PPRFinder.jar. "
+            f"Detected runtimes: {detected_str}. "
+            "Install OpenJDK 17 and/or set PPRFINDER_JAVA to the Java 17 binary path."
+        )
+
+    cmd_java = [java_bin, "-jar", str(pprfinder_jar), protein_fasta, str(hmm_out)]
+    print(f"Running: {' '.join(cmd_java)}")
+
     expected_output = Path(str(hmm_out) + "_motifs.txt")
-    
     try:
-        from . import ppr_finder
-        ppr_finder.run(str(hmm_out), str(expected_output), protein_fasta)
+        subprocess.run(cmd_java, check=True)
     except Exception as e:
-        raise RuntimeError(f"PPRFinder (Python) failed: {e}")
+        raise RuntimeError(f"PPRFinder (Java) failed: {e}")
     
     if not expected_output.exists():
         raise RuntimeError(f"PPRFinder did not generate expected output: {expected_output}")

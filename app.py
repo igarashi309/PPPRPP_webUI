@@ -732,7 +732,7 @@ def load_result(filename):
         
         if os.path.exists(motif_path):
              # Extract simple title
-             motif_df, motif_fig = visualize_motifs(motif_path, analysis_title=f"{job_name} Motifs")
+             motif_df, motif_fig = visualize_motifs(motif_path, analysis_title=f"{job_name} Motifs", discovery_tool=None)
         
         # Return empty dict for analysis_context to force Static Mode in Detail Inspector
         return f"Loaded result: {filename}", path, fig, motif_fig, motif_df, go.Figure(), df, {}
@@ -1059,8 +1059,8 @@ def run_unified_analysis(protein_text, protein_file, rna_text, rna_file, tool_ch
     # 6. Visualize Motifs
     motif_df, motif_fig = pd.DataFrame(), go.Figure()
     if motifs_file and os.path.exists(motifs_file):
-        friendly_title = f"Method: {friendly_method} | Gap: {int(max_gap_size)} | Score: {'On' if use_ps_score else 'Off'}"
-        motif_df, motif_fig = visualize_motifs(motifs_file, analysis_title=friendly_title)
+        friendly_title = f"Tool: {tool_choice} | Method: {friendly_method} | Gap: {int(max_gap_size)} | Score: {'On' if use_ps_score else 'Off'}"
+        motif_df, motif_fig = visualize_motifs(motifs_file, analysis_title=friendly_title, discovery_tool=tool_choice)
     else:
         # Fallback empty
         motif_df, motif_fig = pd.DataFrame(), go.Figure()
@@ -1108,6 +1108,16 @@ def update_main_browser_plot(df, highlight, strand):
     # analysis_type will be extracted from DF by plot_genome_browser
     return plot_genome_browser(df, analysis_type=None, highlight_top=highlight, highlight_strand=strand)
 
+def apply_strand_filter(df, strand_mode):
+    """Returns a strand-filtered dataframe for display controls."""
+    if df is None or df.empty or 'Strand' not in df.columns:
+        return df
+    if strand_mode == "Forward":
+        return df[df['Strand'] == "Forward"]
+    if strand_mode == "Reverse":
+        return df[df['Strand'] == "Reverse"]
+    return df
+
 def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis", highlight_top=False, highlight_strand="Both"):
     """Helper to plot the genome browser."""
     # Try to get analysis type from DF if not provided or generic
@@ -1115,35 +1125,33 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis", highlig
         analysis_type = df['Analysis_Type'].iloc[0]
         
     readable_condition = parse_analysis_type(analysis_type)
+    display_df = apply_strand_filter(df, highlight_strand)
+
+    show_forward = highlight_strand in ("Both", "Forward")
+    show_reverse = highlight_strand in ("Both", "Reverse")
+    rows = 2 if (show_forward and show_reverse) else 1
+
+    fwd_row = 1 if show_forward else None
+    rev_row = None
+    if show_reverse:
+        rev_row = 2 if rows == 2 else 1
     
     fig = make_subplots(
-        rows=2, cols=1, 
-        shared_xaxes=True, 
-        vertical_spacing=0.12
+        rows=rows, cols=1, 
+        shared_xaxes=(rows == 2), 
+        vertical_spacing=0.12 if rows == 2 else 0.0
         # No subplot_titles to avoid overlap with legend
     )
     
-    unique_ppr_names = df['PPR_Name'].unique()
+    unique_ppr_names = display_df['PPR_Name'].unique() if not display_df.empty else []
     colors = px.colors.qualitative.Plotly
     
-    # Calculate global max score first to ensure consistent Y-axis
-    if not df.empty:
-        max_score = df['PPR_Binding_Score'].abs().max()
-        if max_score == 0: max_score = 10
-    else:
-        max_score = 10
-    y_limit = max_score * 1.1
-
-    # Apply shared Y-axis range
-    fig.update_yaxes(range=[0, y_limit], row=1, col=1)
-    fig.update_yaxes(title_text="Rev Score", range=[0, y_limit], autorange="reversed", row=2, col=1) # Row 2 in Genome Browser is Reverse Strand
-
     for i, name in enumerate(unique_ppr_names):
         color = colors[i % len(colors)]
         
         # Forward
-        df_fwd = df[(df['PPR_Name'] == name) & (df['Strand'] == "Forward")]
-        if not df_fwd.empty:
+        df_fwd = display_df[(display_df['PPR_Name'] == name) & (display_df['Strand'] == "Forward")]
+        if fwd_row is not None and not df_fwd.empty:
             # Sort by Score ascending so higher scores are plotted on top
             df_fwd = df_fwd.sort_values(by="PPR_Binding_Score", ascending=True)
             
@@ -1163,11 +1171,11 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis", highlig
                 marker=dict(color=color, size=6, symbol='circle'),
                 customdata=custom_data, 
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: +<br>Gap: %{customdata[2]} (Pos %{customdata[3]})<extra></extra>"
-            ), row=1, col=1)
+            ), row=fwd_row, col=1)
             
         # Reverse
-        df_rev = df[(df['PPR_Name'] == name) & (df['Strand'] == "Reverse")]
-        if not df_rev.empty:
+        df_rev = display_df[(display_df['PPR_Name'] == name) & (display_df['Strand'] == "Reverse")]
+        if rev_row is not None and not df_rev.empty:
             df_rev = df_rev.sort_values(by="PPR_Binding_Score", ascending=True)
             
             custom_data = np.stack((
@@ -1185,28 +1193,24 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis", highlig
                 marker=dict(color=color, size=6, symbol='x'),
                 customdata=custom_data,
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<br>Gap: %{customdata[2]} (Pos %{customdata[3]})<extra></extra>"
-            ), row=2, col=1)
+            ), row=rev_row, col=1)
 
     # Highlight Top Score
-    if highlight_top and not df.empty:
-        # Filter by strand if requested
-        if highlight_strand == "Forward":
-            df_search = df[df['Strand'] == 'Forward']
-        elif highlight_strand == "Reverse":
-            df_search = df[df['Strand'] == 'Reverse']
-        else:
-            df_search = df
-            
+    if highlight_top and not display_df.empty:
+        # Search only within currently displayed strand scope
+        df_search = display_df
+
         if not df_search.empty:
             top_idx = df_search['PPR_Binding_Score'].abs().idxmax()
-            top_row = df.loc[top_idx] # Access from original df to be safe with indices
+            top_row = display_df.loc[top_idx]
             
             t_pos = top_row['Genome_Position']
             t_score = top_row['PPR_Binding_Score']
             t_strand = top_row['Strand']
             
-            # Determine row based on strand
-            row_idx = 1 if t_strand == "Forward" else 2
+            row_idx = fwd_row if t_strand == "Forward" else rev_row
+            if row_idx is None:
+                row_idx = 1
             
             fig.add_trace(go.Scatter(
                 x=[t_pos], y=[t_score],
@@ -1220,19 +1224,25 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis", highlig
     # Calculate Global Max/Min for visual guidance
     global_max = 0
     global_min = 0
-    if not df.empty:
-        scores = df['PPR_Binding_Score']
+    if not display_df.empty:
+        scores = display_df['PPR_Binding_Score']
         global_max = scores.max()
         global_min = scores.min()
     
     # Add Max/Min reference lines
     if global_max > 0:
-        fig.add_hline(y=global_max, line_dash="dash", line_color="blue", annotation_text=f"Max: {global_max:.1f}", annotation_position="top right", row=1, col=1)
-        fig.add_hline(y=global_max, line_dash="dash", line_color="blue", annotation_text=f"Max: {global_max:.1f}", annotation_position="bottom right", row=2, col=1)
+        if fwd_row is not None:
+            fig.add_hline(y=global_max, line_dash="dash", line_color="blue", annotation_text=f"Max: {global_max:.1f}", annotation_position="top right", row=fwd_row, col=1)
+        if rev_row is not None:
+            max_anno_pos = "bottom right" if rows == 2 else "top right"
+            fig.add_hline(y=global_max, line_dash="dash", line_color="blue", annotation_text=f"Max: {global_max:.1f}", annotation_position=max_anno_pos, row=rev_row, col=1)
     
     if global_min > 0:
-        fig.add_hline(y=global_min, line_dash="dot", line_color="red", annotation_text=f"Min: {global_min:.1f}", annotation_position="bottom right", row=1, col=1)
-        fig.add_hline(y=global_min, line_dash="dot", line_color="red", annotation_text=f"Min: {global_min:.1f}", annotation_position="top right", row=2, col=1)
+        if fwd_row is not None:
+            fig.add_hline(y=global_min, line_dash="dot", line_color="red", annotation_text=f"Min: {global_min:.1f}", annotation_position="bottom right", row=fwd_row, col=1)
+        if rev_row is not None:
+            min_anno_pos = "top right" if rows == 2 else "bottom right"
+            fig.add_hline(y=global_min, line_dash="dot", line_color="red", annotation_text=f"Min: {global_min:.1f}", annotation_position=min_anno_pos, row=rev_row, col=1)
 
     # Calculate Y-axis limits based on Global Min/Max with padding
     pad = (global_max - global_min) * 0.1
@@ -1241,15 +1251,16 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis", highlig
     y_min_limit = global_min - pad
 
     import time
+    strand_label = {"Both": "+ / -", "Forward": "+ only", "Reverse": "- only"}.get(highlight_strand, str(highlight_strand))
     fig.update_layout(
         title=dict(
-            text=f"<b>Genome Browser - {seq_id}</b><br><sup>Method: {readable_condition}</sup>",
+            text=f"<b>Genome Browser - {seq_id}</b><br><sup>Method: {readable_condition} | Strand: {strand_label}</sup>",
             y=0.95,
             x=0.5,
             xanchor='center',
             yanchor='top'
         ),
-        height=500,
+        height=500 if rows == 2 else 360,
         autosize=True,
         hovermode="closest",
         legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center", yanchor="top"),  # Legend at bottom
@@ -1257,9 +1268,14 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis", highlig
         uirevision=str(time.time())  # Force view reset on each render
     )
     
-    fig.update_xaxes(title_text="Genomic Position", row=2, col=1)
-    fig.update_yaxes(title_text="Fwd Score", row=1, col=1, range=[y_min_limit, y_max_limit], autorange=False)
-    fig.update_yaxes(title_text="Rev Score", row=2, col=1, range=[y_min_limit, y_max_limit], autorange="reversed")
+    fig.update_xaxes(title_text="Genomic Position", row=rows, col=1)
+    if fwd_row is not None and rev_row is not None and rows == 2:
+        fig.update_yaxes(title_text="Fwd Score", row=fwd_row, col=1, range=[y_min_limit, y_max_limit], autorange=False)
+        fig.update_yaxes(title_text="Rev Score", row=rev_row, col=1, range=[y_min_limit, y_max_limit], autorange="reversed")
+    elif fwd_row is not None:
+        fig.update_yaxes(title_text="Fwd Score", row=fwd_row, col=1, range=[y_min_limit, y_max_limit], autorange=False)
+    elif rev_row is not None:
+        fig.update_yaxes(title_text="Rev Score", row=rev_row, col=1, range=[y_min_limit, y_max_limit], autorange="reversed")
     
     return fig
 
@@ -1277,12 +1293,31 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
     
     if feature_types is None:
         feature_types = ["gene", "CDS", "tRNA", "rRNA", "exon"]
-        
+
+    show_forward = highlight_strand in ("Both", "Forward")
+    show_reverse = highlight_strand in ("Both", "Reverse")
+    if show_forward and show_reverse:
+        rows = 3
+        row_heights = [0.4, 0.2, 0.4]
+        vertical_spacing = 0.10
+        display_height = plot_height
+        fwd_row = 1
+        gene_row = 2
+        rev_row = 3
+    else:
+        rows = 2
+        row_heights = [0.78, 0.22]
+        vertical_spacing = 0.08
+        display_height = max(420, int(plot_height * 0.82))
+        fwd_row = 1 if show_forward else None
+        rev_row = 1 if show_reverse else None
+        gene_row = 2
+
     fig = make_subplots(
-        rows=3, cols=1, 
+        rows=rows, cols=1, 
         shared_xaxes=True, 
-        vertical_spacing=0.10,
-        row_heights=[0.4, 0.2, 0.4]
+        vertical_spacing=vertical_spacing,
+        row_heights=row_heights
         # No subplot_titles to avoid overlap with legend
     )
     
@@ -1441,7 +1476,8 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
         if range_size >= MAX_RECALC_RANGE and analysis_context:
              recalc_msg = " (Top Hits Only - Zoom in <50kb for Full Data)"
 
-    print(f"DEBUG: Plotting Range {start}-{end}{recalc_msg}. Rows: {len(df_range)}")
+    df_plot = apply_strand_filter(df_range, highlight_strand)
+    print(f"DEBUG: Plotting Range {start}-{end}{recalc_msg}. Rows: {len(df_plot)} (from {len(df_range)})")
     
     # ... Rest of plotting code uses df_range ...
     # We need to ensure df_range has 'PPR_Name' column if re-calculated. Added above.
@@ -1450,11 +1486,11 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
     
     # Update title with recalc status
     
-    if not df_range.empty:
-        print(f"DEBUG: Strands in Range: {df_range['Strand'].unique()}")
-        print(f"DEBUG: Top 5 rows in range:\n{df_range[['Genome_Position', 'Strand', 'PPR_Binding_Score']].head().to_string()}")
+    if not df_plot.empty:
+        print(f"DEBUG: Strands in Range: {df_plot['Strand'].unique()}")
+        print(f"DEBUG: Top 5 rows in range:\n{df_plot[['Genome_Position', 'Strand', 'PPR_Binding_Score']].head().to_string()}")
         # Calculate max score from VISIBLE range for symmetric Y-axis
-        max_score = df_range['PPR_Binding_Score'].abs().max()
+        max_score = df_plot['PPR_Binding_Score'].abs().max()
         if max_score == 0: max_score = 10
     else:
         # Fallback to full DF or default
@@ -1466,15 +1502,15 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
              
     y_limit = max_score * 1.1
 
-    unique_ppr_names = df['PPR_Name'].unique()
+    unique_ppr_names = df_plot['PPR_Name'].unique() if not df_plot.empty else []
     colors = px.colors.qualitative.Plotly
     
     for i, name in enumerate(unique_ppr_names):
         color = colors[i % len(colors)]
         
         # Forward
-        df_fwd = df_range[(df_range['PPR_Name'] == name) & (df_range['Strand'] == "Forward")]
-        if not df_fwd.empty:
+        df_fwd = df_plot[(df_plot['PPR_Name'] == name) & (df_plot['Strand'] == "Forward")]
+        if fwd_row is not None and not df_fwd.empty:
             # Prepare Custom Data for Range Browser if available
             custom_data = np.stack((
                 df_fwd.index, 
@@ -1491,11 +1527,11 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
                 marker=dict(color=color, size=8, symbol='circle'),
                 customdata=custom_data,
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: +<br>Gap: %{customdata[2]} (Pos %{customdata[3]})<extra></extra>"
-            ), row=1, col=1)
+            ), row=fwd_row, col=1)
             
         # Reverse
-        df_rev = df_range[(df_range['PPR_Name'] == name) & (df_range['Strand'] == "Reverse")]
-        if not df_rev.empty:
+        df_rev = df_plot[(df_plot['PPR_Name'] == name) & (df_plot['Strand'] == "Reverse")]
+        if rev_row is not None and not df_rev.empty:
             custom_data = np.stack((
                 df_rev.index, 
                 df_rev['PPR_Binding_Score'],
@@ -1511,28 +1547,24 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
                 marker=dict(color=color, size=8, symbol='x'),
                 customdata=custom_data,
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<br>Gap: %{customdata[2]} (Pos %{customdata[3]})<extra></extra>"
-            ), row=3, col=1)
+            ), row=rev_row, col=1)
 
     # Highlight Top Score in Range
-    if highlight_top and not df_range.empty:
-         # Filter by strand if requested
-        if highlight_strand == "Forward":
-            df_search = df_range[df_range['Strand'] == 'Forward']
-        elif highlight_strand == "Reverse":
-            df_search = df_range[df_range['Strand'] == 'Reverse']
-        else:
-            df_search = df_range
-            
+    if highlight_top and not df_plot.empty:
+         # Search only within currently displayed strand scope
+        df_search = df_plot
+
         if not df_search.empty:
             top_idx = df_search['PPR_Binding_Score'].abs().idxmax()
-            top_row = df_range.loc[top_idx] 
+            top_row = df_plot.loc[top_idx] 
             
             t_pos = top_row['Genome_Position']
             t_score = top_row['PPR_Binding_Score']
             t_strand = top_row['Strand']
             
-            # Row 1 for Fwd, Row 3 for Rev
-            row_idx = 1 if t_strand == "Forward" else 3
+            row_idx = fwd_row if t_strand == "Forward" else rev_row
+            if row_idx is None:
+                row_idx = 1
             
             fig.add_trace(go.Scatter(
                 x=[t_pos], y=[t_score],
@@ -1543,8 +1575,8 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
                 hovertext=f"TOP SCORE<br>Pos: {t_pos}<br>Score: {t_score:.2f}"
             ), row=row_idx, col=1)
 
-    # 2. Plot Gene Annotations from GFF3 (Row 2)
-    fig.add_trace(go.Scatter(x=[start, end], y=[0, 0], mode='markers', marker=dict(opacity=0), showlegend=False, hoverinfo='skip'), row=2, col=1)
+    # Plot Gene Annotations
+    fig.add_trace(go.Scatter(x=[start, end], y=[0, 0], mode='markers', marker=dict(opacity=0), showlegend=False, hoverinfo='skip'), row=gene_row, col=1)
     
     if gff_path and os.path.exists(gff_path):
         features = ncbi.parse_gff(gff_path, start, end)
@@ -1603,7 +1635,7 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
                 path = f"M {x_head_base},{y_top} L {f_end},{y_top} L {f_end},{y_bot} L {x_head_base},{y_bot} L {f_start},{y_mid} Z"
 
             fig.add_shape(
-                type="path", path=path, line=dict(color=color, width=1), fillcolor=color, opacity=0.6, row=2, col=1
+                type="path", path=path, line=dict(color=color, width=1), fillcolor=color, opacity=0.6, row=gene_row, col=1
             )
             
             # Simplified Label Logic (Centered, No Box)
@@ -1619,7 +1651,7 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
                 # bordercolor="gray", # Removed
                 # borderwidth=1, # Removed
                 opacity=1.0,
-                row=2, col=1
+                row=gene_row, col=1
             )
             
     # Add title with conditions
@@ -1632,15 +1664,16 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
     
     title_main = f"<b>{prot_str}Range {start}-{end} {seq_str}</b>"
 
+    strand_label = {"Both": "+ / -", "Forward": "+ only", "Reverse": "- only"}.get(highlight_strand, str(highlight_strand))
     fig.update_layout(
         title=dict(
-            text=f"{title_main}<br><sup>Method: {readable_condition}{recalc_msg}</sup>",
+            text=f"{title_main}<br><sup>Method: {readable_condition}{recalc_msg} | Strand: {strand_label}</sup>",
             y=0.95,
             x=0.5,
             xanchor='center',
             yanchor='top'
         ),
-        height=plot_height,
+        height=display_height,
         autosize=True,
         hovermode="closest",
         legend=dict(orientation="h", y=-0.1, x=0.5, xanchor="center", yanchor="top"),  # Legend at bottom
@@ -1653,10 +1686,10 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
     global_max = 0
     global_min = 0 # Usually binding score is positive, but let's check true min
     
-    if not df_range.empty:
+    if not df_plot.empty:
         # Use abs() or raw? User said "Forward and Reverse combined Max".
         # Assuming we want the highest peak.
-        scores = df_range['PPR_Binding_Score']
+        scores = df_plot['PPR_Binding_Score']
         global_max = scores.max()
         global_min = scores.min()
         
@@ -1669,16 +1702,20 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
     # If `global_max` is e.g. 245, we draw line at 245 on both.
     
     if global_max > 0:
-        # Forward Plot
-        fig.add_hline(y=global_max, line_dash="dash", line_color="blue", annotation_text=f"Max: {global_max:.1f}", annotation_position="top right", row=1, col=1)
-        # Reverse Plot (Symmetric)
-        fig.add_hline(y=global_max, line_dash="dash", line_color="blue", annotation_text=f"Max: {global_max:.1f}", annotation_position="bottom right", row=3, col=1)
+        if fwd_row is not None:
+            fig.add_hline(y=global_max, line_dash="dash", line_color="blue", annotation_text=f"Max: {global_max:.1f}", annotation_position="top right", row=fwd_row, col=1)
+        if rev_row is not None:
+            max_anno_pos = "bottom right" if rows == 3 else "top right"
+            fig.add_hline(y=global_max, line_dash="dash", line_color="blue", annotation_text=f"Max: {global_max:.1f}", annotation_position=max_anno_pos, row=rev_row, col=1)
 
     if global_min > 0: # Only if meaningful min exists (and > 0) or if user wants Min of displayed range even if small? 
         # Usually peaks are what matters. But user asked for Min.
         # "Min value". If min is 150, draw line at 150.
-        fig.add_hline(y=global_min, line_dash="dot", line_color="red", annotation_text=f"Min: {global_min:.1f}", annotation_position="bottom right", row=1, col=1)
-        fig.add_hline(y=global_min, line_dash="dot", line_color="red", annotation_text=f"Min: {global_min:.1f}", annotation_position="top right", row=3, col=1)
+        if fwd_row is not None:
+            fig.add_hline(y=global_min, line_dash="dot", line_color="red", annotation_text=f"Min: {global_min:.1f}", annotation_position="bottom right", row=fwd_row, col=1)
+        if rev_row is not None:
+            min_anno_pos = "top right" if rows == 3 else "bottom right"
+            fig.add_hline(y=global_min, line_dash="dot", line_color="red", annotation_text=f"Min: {global_min:.1f}", annotation_position=min_anno_pos, row=rev_row, col=1)
 
     # Shared Y-Axis Limits (Based on Global Min/Max with padding)
     # User requested: Reference source is Global Max and Min values.
@@ -1696,9 +1733,16 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
     y_min_limit = global_min - pad
     
     # Force Symmetry + Add Y-axis Labels
-    fig.update_yaxes(title_text="Fwd Score", range=[y_min_limit, y_max_limit], autorange=False, row=1, col=1)
-    fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, row=2, col=1)  # Hide Gene Annotation Y-axis
-    fig.update_yaxes(title_text="Rev Score", range=[y_min_limit, y_max_limit], autorange="reversed", row=3, col=1)
+    if fwd_row is not None and rev_row is not None and rows == 3:
+        fig.update_yaxes(title_text="Fwd Score", range=[y_min_limit, y_max_limit], autorange=False, row=fwd_row, col=1)
+        fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, row=gene_row, col=1)
+        fig.update_yaxes(title_text="Rev Score", range=[y_min_limit, y_max_limit], autorange="reversed", row=rev_row, col=1)
+    elif fwd_row is not None:
+        fig.update_yaxes(title_text="Fwd Score", range=[y_min_limit, y_max_limit], autorange=False, row=fwd_row, col=1)
+        fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, row=gene_row, col=1)
+    elif rev_row is not None:
+        fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, row=gene_row, col=1)
+        fig.update_yaxes(title_text="Rev Score", range=[y_min_limit, y_max_limit], autorange="reversed", row=rev_row, col=1)
     
     return fig
 
@@ -1786,7 +1830,7 @@ def plot_genes_only(gff_path, start, end, seq_id, feature_types):
     return fig
 
 
-def visualize_motifs(motifs_file, analysis_title=None):
+def visualize_motifs(motifs_file, analysis_title=None, discovery_tool=None):
     """Parses motifs file and returns DataFrame and Plotly figure."""
     try:
         # Read _motifs.txt (created by ppr_finder.py)
@@ -1920,8 +1964,14 @@ def visualize_motifs(motifs_file, analysis_title=None):
             showlegend=False
         ))
         
+        # Infer tool label for loaded legacy results if not explicitly provided.
+        tool_label = discovery_tool
+        if not tool_label:
+            unique_types = set(df['Type'].dropna().astype(str).unique())
+            tool_label = "PS_Scan" if unique_types == {"PPR"} else "PPRFinder"
+
         # Layout settings
-        title_text = f"Discovered Motifs (PPRFinder) - {fasta_name}"
+        title_text = f"Discovered Motifs ({tool_label}) - {fasta_name}"
         if analysis_title:
             title_text += f"<br><sub>{analysis_title}</sub>"
             
@@ -3188,7 +3238,7 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)", css=custom_css) a
                 with gr.Column():
                     scoring_method = gr.Radio(["P-type", "PLS-type"], value="P-type", label="Scoring Method")
                     use_ps_score = gr.Checkbox(label="Use Motif Confidence Score (+Score)", value=True)
-                    range_max_gap = gr.Number(value=0, label="Max Gap Size", precision=0)
+                    range_max_gap = gr.Number(value=0, label="Gap Size", precision=0)
             
             gr.Markdown("---")
             run_btn = gr.Button("Run Analysis", variant="primary", size="lg")
@@ -3386,4 +3436,17 @@ with gr.Blocks(title="P-type PPR Prediction Program (PPPRPP)", css=custom_css) a
 
 if __name__ == "__main__":
     cleanup_temp_files()
-    demo.queue().launch(share=False, inbrowser=True)
+    server_name = os.environ.get("PPPRPP_SERVER_NAME", "127.0.0.1")
+    try:
+        server_port = int(os.environ.get("PPPRPP_SERVER_PORT", "7860"))
+    except ValueError:
+        server_port = 7860
+    inbrowser_flag = os.environ.get("PPPRPP_INBROWSER", "1").strip().lower()
+    inbrowser = inbrowser_flag in {"1", "true", "yes", "on"}
+
+    demo.queue().launch(
+        share=False,
+        inbrowser=inbrowser,
+        server_name=server_name,
+        server_port=server_port,
+    )
