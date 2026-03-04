@@ -1,5 +1,18 @@
 # Changelog
 
+## [v1.1.0] - 2026-03-04
+
+### Added
+- **Benchmark Evaluation Script**: Added `scripts/benchmark_prediction.py` for gap-size sweep benchmarking. Computes S/N ratio (validated-site score / Q95 of off-target scores), rank percentile, detected rate, and runtime across user-specified gap sizes.
+- **Revision Figure Generator**: Added `scripts/generate_revision_figures.py` to produce Supplementary Figures S2/S3 and Supplementary Table S1 from benchmark CSV outputs.
+
+### Changed
+- **Dependency Upgrade**: Upgraded `gradio` from `4.44.1` to `6.2.0`. Updated `demo.launch()` arguments and component APIs to align with Gradio 6.x specifications.
+- **Gap Size Parameter Label**: Unified user-facing label from `max_gap` / `Allow Gaps` to **Gap Size** throughout the UI and documentation for consistency with the manuscript.
+
+### Fixed
+- **PPRFinder Scoring Bug**: Corrected a motif-score calculation error in the PPRFinder integration. Previously, the combined score was incorrectly computed; the fix ensures accurate per-window scores used for target-site ranking.
+
 ## [v0.1.1] - 2026-01-20
 
 ### Fixed
