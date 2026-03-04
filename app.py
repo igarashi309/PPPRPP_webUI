@@ -1163,13 +1163,12 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis", highlig
                 df_fwd.get('Gap_Index', [0]*len(df_fwd))
             ), axis=-1)
 
-            fig.add_trace(go.Scatter(
+            fig.add_trace(go.Scattergl(
                 x=df_fwd['Genome_Position'],
                 y=df_fwd['PPR_Binding_Score'],
                 mode='markers',
                 name=f"{name} (+)",
-                marker=dict(color=color, size=8, symbol='circle',
-                            opacity=0.75, line=dict(width=1, color='rgba(0,0,0,0.4)')),
+                marker=dict(color=color, size=7, symbol='circle', opacity=0.7),
                 customdata=custom_data,
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: +<br>Gap: %{customdata[2]} (Pos %{customdata[3]})<extra></extra>"
             ), row=fwd_row, col=1)
@@ -1186,13 +1185,12 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis", highlig
                 df_rev.get('Gap_Index', [0]*len(df_rev))
             ), axis=-1)
 
-            fig.add_trace(go.Scatter(
+            fig.add_trace(go.Scattergl(
                 x=df_rev['Genome_Position'],
                 y=df_rev['PPR_Binding_Score'],
                 mode='markers',
                 name=f"{name} (-)",
-                marker=dict(color=color, size=8, symbol='diamond',
-                            opacity=0.75, line=dict(width=1, color='rgba(0,0,0,0.4)')),
+                marker=dict(color=color, size=7, symbol='diamond', opacity=0.7),
                 customdata=custom_data,
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<br>Gap: %{customdata[2]} (Pos %{customdata[3]})<extra></extra>"
             ), row=rev_row, col=1)
@@ -1521,13 +1519,12 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
                 df_fwd.get('Gap_Index', [0]*len(df_fwd))
             ), axis=-1)
 
-            fig.add_trace(go.Scatter(
+            fig.add_trace(go.Scattergl(
                 x=df_fwd['Genome_Position'],
                 y=df_fwd['PPR_Binding_Score'],
                 mode='markers',
                 name=f"{name} (+)",
-                marker=dict(color=color, size=8, symbol='circle',
-                            opacity=0.75, line=dict(width=1, color='rgba(0,0,0,0.4)')),
+                marker=dict(color=color, size=7, symbol='circle', opacity=0.7),
                 customdata=custom_data,
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: +<br>Gap: %{customdata[2]} (Pos %{customdata[3]})<extra></extra>"
             ), row=fwd_row, col=1)
@@ -1542,13 +1539,12 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
                 df_rev.get('Gap_Index', [0]*len(df_rev))
             ), axis=-1)
 
-            fig.add_trace(go.Scatter(
+            fig.add_trace(go.Scattergl(
                 x=df_rev['Genome_Position'],
                 y=df_rev['PPR_Binding_Score'],
                 mode='markers',
                 name=f"{name} (-)",
-                marker=dict(color=color, size=8, symbol='diamond',
-                            opacity=0.75, line=dict(width=1, color='rgba(0,0,0,0.4)')),
+                marker=dict(color=color, size=7, symbol='diamond', opacity=0.7),
                 customdata=custom_data,
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<br>Gap: %{customdata[2]} (Pos %{customdata[3]})<extra></extra>"
             ), row=rev_row, col=1)
