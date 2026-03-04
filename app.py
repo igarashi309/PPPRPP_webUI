@@ -28,7 +28,7 @@ os.makedirs(INPUT_DIR, exist_ok=True)
 
 TMP_DIR = OUTPUT_DIR
 
-VERSION = "v1.0.0"
+VERSION = "v1.1.0"
 
 def cleanup_temp_files():
     """Cleans up temporary files from previous runs."""
@@ -1144,53 +1144,55 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis", highlig
     )
     
     unique_ppr_names = display_df['PPR_Name'].unique() if not display_df.empty else []
-    colors = px.colors.qualitative.Plotly
-    
+    colors = px.colors.qualitative.D3  # D3 palette: higher contrast and colorblind-friendly
+
     for i, name in enumerate(unique_ppr_names):
         color = colors[i % len(colors)]
-        
+
         # Forward
         df_fwd = display_df[(display_df['PPR_Name'] == name) & (display_df['Strand'] == "Forward")]
         if fwd_row is not None and not df_fwd.empty:
             # Sort by Score ascending so higher scores are plotted on top
             df_fwd = df_fwd.sort_values(by="PPR_Binding_Score", ascending=True)
-            
+
             # Prepare Custom Data: [Index, Score, Gap_Size, Gap_Index]
             custom_data = np.stack((
-                df_fwd.index, 
+                df_fwd.index,
                 df_fwd['PPR_Binding_Score'],
                 df_fwd.get('Gap_Size', [0]*len(df_fwd)),
                 df_fwd.get('Gap_Index', [0]*len(df_fwd))
             ), axis=-1)
-            
+
             fig.add_trace(go.Scatter(
                 x=df_fwd['Genome_Position'],
                 y=df_fwd['PPR_Binding_Score'],
                 mode='markers',
                 name=f"{name} (+)",
-                marker=dict(color=color, size=6, symbol='circle'),
-                customdata=custom_data, 
+                marker=dict(color=color, size=8, symbol='circle',
+                            opacity=0.75, line=dict(width=1, color='rgba(0,0,0,0.4)')),
+                customdata=custom_data,
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: +<br>Gap: %{customdata[2]} (Pos %{customdata[3]})<extra></extra>"
             ), row=fwd_row, col=1)
-            
+
         # Reverse
         df_rev = display_df[(display_df['PPR_Name'] == name) & (display_df['Strand'] == "Reverse")]
         if rev_row is not None and not df_rev.empty:
             df_rev = df_rev.sort_values(by="PPR_Binding_Score", ascending=True)
-            
+
             custom_data = np.stack((
-                df_rev.index, 
+                df_rev.index,
                 df_rev['PPR_Binding_Score'],
                 df_rev.get('Gap_Size', [0]*len(df_rev)),
                 df_rev.get('Gap_Index', [0]*len(df_rev))
             ), axis=-1)
-            
+
             fig.add_trace(go.Scatter(
                 x=df_rev['Genome_Position'],
-                y=df_rev['PPR_Binding_Score'], 
+                y=df_rev['PPR_Binding_Score'],
                 mode='markers',
                 name=f"{name} (-)",
-                marker=dict(color=color, size=6, symbol='x'),
+                marker=dict(color=color, size=8, symbol='diamond',
+                            opacity=0.75, line=dict(width=1, color='rgba(0,0,0,0.4)')),
                 customdata=custom_data,
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<br>Gap: %{customdata[2]} (Pos %{customdata[3]})<extra></extra>"
             ), row=rev_row, col=1)
@@ -1503,17 +1505,17 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
     y_limit = max_score * 1.1
 
     unique_ppr_names = df_plot['PPR_Name'].unique() if not df_plot.empty else []
-    colors = px.colors.qualitative.Plotly
-    
+    colors = px.colors.qualitative.D3  # D3 palette: higher contrast and colorblind-friendly
+
     for i, name in enumerate(unique_ppr_names):
         color = colors[i % len(colors)]
-        
+
         # Forward
         df_fwd = df_plot[(df_plot['PPR_Name'] == name) & (df_plot['Strand'] == "Forward")]
         if fwd_row is not None and not df_fwd.empty:
             # Prepare Custom Data for Range Browser if available
             custom_data = np.stack((
-                df_fwd.index, 
+                df_fwd.index,
                 df_fwd['PPR_Binding_Score'],
                 df_fwd.get('Gap_Size', [0]*len(df_fwd)),
                 df_fwd.get('Gap_Index', [0]*len(df_fwd))
@@ -1524,16 +1526,17 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
                 y=df_fwd['PPR_Binding_Score'],
                 mode='markers',
                 name=f"{name} (+)",
-                marker=dict(color=color, size=8, symbol='circle'),
+                marker=dict(color=color, size=8, symbol='circle',
+                            opacity=0.75, line=dict(width=1, color='rgba(0,0,0,0.4)')),
                 customdata=custom_data,
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: +<br>Gap: %{customdata[2]} (Pos %{customdata[3]})<extra></extra>"
             ), row=fwd_row, col=1)
-            
+
         # Reverse
         df_rev = df_plot[(df_plot['PPR_Name'] == name) & (df_plot['Strand'] == "Reverse")]
         if rev_row is not None and not df_rev.empty:
             custom_data = np.stack((
-                df_rev.index, 
+                df_rev.index,
                 df_rev['PPR_Binding_Score'],
                 df_rev.get('Gap_Size', [0]*len(df_rev)),
                 df_rev.get('Gap_Index', [0]*len(df_rev))
@@ -1541,10 +1544,11 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
 
             fig.add_trace(go.Scatter(
                 x=df_rev['Genome_Position'],
-                y=df_rev['PPR_Binding_Score'], 
+                y=df_rev['PPR_Binding_Score'],
                 mode='markers',
                 name=f"{name} (-)",
-                marker=dict(color=color, size=8, symbol='x'),
+                marker=dict(color=color, size=8, symbol='diamond',
+                            opacity=0.75, line=dict(width=1, color='rgba(0,0,0,0.4)')),
                 customdata=custom_data,
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<br>Gap: %{customdata[2]} (Pos %{customdata[3]})<extra></extra>"
             ), row=rev_row, col=1)

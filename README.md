@@ -1,12 +1,15 @@
-# P-type PPR Prediction Program (PPPRPP)
+# PPR Target Site Prediction Program (PPPRPP)
 
-A standalone web application for identifying PPR motifs in protein sequences and analyzing their binding sites on RNA targets.
-For `PPRFinder`, this app uses the Java implementation (`PPRfinder.jar`) so motif discovery matches the reference behavior.
+A standalone web application for integrated PPR motif discovery and RNA target site prediction. The tool accepts a PPR protein sequence and one or more RNA sequences as input, automatically identifies PPR motifs, scores all candidate binding windows, and visualizes the results—no bioinformatics expertise required. Both P-type and PLS-type scoring schemes are supported.
+
+For motif discovery, the app uses **PPRFinder** (Java implementation, `PPRfinder.jar`) or the **ScanProsite API** (network-dependent; see notes below).
 
 ## Features
-- **Unified Workflow**: Input Protein and RNA sequences to perform discovery and analysis in one step.
-- **Interactive Visualization**: Genome Browser with detailed binding scores and interactive site inspection.
-- **Gap Analysis**: Analyze binding sites with specific Gap Sizes (e.g., Gap 3). The analysis efficiently scans for sites matching the specified gap size (in addition to Gap 0). When inspecting a specific site, you can interactively explore all variations (e.g., Gap 1, 2, 3) instantly.
+- **Integrated Workflow**: Input protein and RNA sequences to perform motif discovery, target scoring, and visualization in one step.
+- **P-type and PLS-type Support**: Select the scoring method appropriate for your PPR protein.
+- **Interactive Visualization**: Genome Browser with binding score distribution and interactive site inspection.
+- **Gap Analysis**: Analyze binding sites with a specified Gap Size (e.g., Gap 3). The analysis evaluates the specified gap size together with Gap 0 as a baseline. When inspecting a specific site, you can interactively explore all gap variations (e.g., Gap 1, 2, 3) instantly.
+- **Strand Filtering**: The **Show Strand** option filters the browser display to Forward-only, Reverse-only, or Both strands. When "Both" is selected, forward and reverse scores appear in separate subplots. The current strand setting is shown in the plot title.
 - **Cross-Platform**: Runs on Windows (via WSL), Mac, and Linux.
 
 ## Quick Start (Mac / Linux / Windows WSL)
@@ -74,6 +77,7 @@ Then open: `http://127.0.0.1:7860`
     -   **Linux/WSL**: `sudo apt install openjdk-17-jre-headless`
     -   Optional: set `PPRFINDER_JAVA` to the Java 17 binary path (e.g. `/opt/homebrew/opt/openjdk@17/bin/java`).
 - **Browser doesn't open**: Look for a URL in the console output (e.g., `http://127.0.0.1:7860`) and open it manually.
+- **PS_Scan returns no output or fails**: The PS_Scan option uses the ExPASy ScanProsite REST API (https://prosite.expasy.org), which requires an active internet connection. If the API is unavailable (network error, server downtime), an error message will appear in the System Log at the bottom of the interface. In this case, switch to **PPRFinder** (the default, recommended tool) which runs locally without network access.
 
 ## Basic Usage
 
@@ -96,14 +100,18 @@ This tab is for preparing your data.
 ### 2. Analysis (Tab 2: Settings & Run)
 Configure the analysis parameters.
 
-1.  **Tool Selection**: Choose the analysis algorithm (e.g., `Kobayashi 2000`, `Yan 2019`).
-2.  **Parameters**:
-    - **Gap Size**: Set the maximum gap size to consider (e.g., 3).
-    - **Scoring**: Enable/Disable P-S Score usage.
-3.  **Visual Settings**:
+1.  **Discovery Tool**: Choose the motif discovery algorithm.
+    - **PPRFinder** (default, recommended): Runs locally using HMMER. No internet connection required.
+    - **PS_Scan**: Uses the ExPASy ScanProsite API. Requires an active internet connection; if the server is unavailable, an error is shown in the System Log.
+2.  **Scoring Method**: Select **P-type** or **PLS-type** scoring. Choose based on the class of your PPR protein.
+3.  **Parameters**:
+    - **Gap Size**: Set the exact gap size to use (e.g., 3). The analysis evaluates candidate windows matching this gap size, together with Gap 0 as a baseline. A value of 0 means no gap (contiguous motif matching only).
+    - **Use Motif Confidence Score (+Score)**: Enable to weight scores by per-motif confidence values from the discovery tool.
+4.  **Visual Settings**:
     - **Plot Height**: Adjust the height of the result genome browser.
-    - **Highlight Scores**: Option to highlight the top-scoring binding site.
-4.  **Run**:
+    - **Highlight Top**: Highlights the top-scoring binding site with a star marker.
+    - **Show Strand**: Filter the browser display. Select **Forward**, **Reverse**, or **Both**. When **Both** is selected, forward and reverse strand scores are shown in separate subplots. The active filter is shown in the plot title (e.g., "Strand: + only"). Note: if the target RNA is single-stranded or only one strand is scored, switching to the other strand will show an empty plot.
+5.  **Run**:
     - Enter a Job Name (optional).
     - Click **"Run Analysis"**.
 

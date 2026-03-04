@@ -359,8 +359,22 @@ def run_ps_scan_api(protein_fasta, output_dir):
         handle = ScanProsite.scan(seq=sequence, sig=PS_MOTIF, mirror='https://prosite.expasy.org', output='xml')
         xml_result = handle.read()
         handle.close()
+    except OSError as e:
+        raise RuntimeError(
+            f"PS_Scan (ScanProsite API) failed: network/connection error. "
+            f"Please check your internet connection and try again. "
+            f"Details: {e}"
+        )
     except Exception as e:
-        raise RuntimeError(f"ScanProsite API failed: {e}")
+        err_str = str(e)
+        if "HTTP" in err_str or "urllib" in err_str or "ssl" in err_str.lower():
+            raise RuntimeError(
+                f"PS_Scan (ScanProsite API) server error. "
+                f"The ExPASy ScanProsite server may be temporarily unavailable. "
+                f"Try again later or use PPRFinder instead. "
+                f"Details: {e}"
+            )
+        raise RuntimeError(f"PS_Scan (ScanProsite API) failed: {e}")
         
     # Save XML
     xml_path = Path(output_dir) / f"{seq_id}_ps_scan.xml"
