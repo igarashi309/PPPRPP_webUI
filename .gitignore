@@ -34,3 +34,6 @@ data/input/*
 !data/input/.gitkeep
 data/output/*
 !data/output/.gitkeep
+
+# Benchmark raw data (generated locally, not distributed)
+data/benchmark/
