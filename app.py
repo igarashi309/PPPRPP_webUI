@@ -1168,7 +1168,8 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis", highlig
                 y=df_fwd['PPR_Binding_Score'],
                 mode='markers',
                 name=f"{name} (+)",
-                marker=dict(color=color, size=7, symbol='circle', opacity=0.7),
+                marker=dict(color=color, size=8, symbol='circle',
+                            opacity=0.75, line=dict(width=1, color='rgba(0,0,0,0.4)')),
                 customdata=custom_data,
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: +<br>Gap: %{customdata[2]} (Pos %{customdata[3]})<extra></extra>"
             ), row=fwd_row, col=1)
@@ -1190,7 +1191,8 @@ def plot_genome_browser(df, seq_id="Sequence", analysis_type="Analysis", highlig
                 y=df_rev['PPR_Binding_Score'],
                 mode='markers',
                 name=f"{name} (-)",
-                marker=dict(color=color, size=7, symbol='diamond', opacity=0.7),
+                marker=dict(color=color, size=8, symbol='diamond',
+                            opacity=0.75, line=dict(width=1, color='rgba(0,0,0,0.4)')),
                 customdata=custom_data,
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<br>Gap: %{customdata[2]} (Pos %{customdata[3]})<extra></extra>"
             ), row=rev_row, col=1)
@@ -1524,7 +1526,8 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
                 y=df_fwd['PPR_Binding_Score'],
                 mode='markers',
                 name=f"{name} (+)",
-                marker=dict(color=color, size=7, symbol='circle', opacity=0.7),
+                marker=dict(color=color, size=8, symbol='circle',
+                            opacity=0.75, line=dict(width=1, color='rgba(0,0,0,0.4)')),
                 customdata=custom_data,
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: +<br>Gap: %{customdata[2]} (Pos %{customdata[3]})<extra></extra>"
             ), row=fwd_row, col=1)
@@ -1544,7 +1547,8 @@ def plot_range_browser(df, gff_path, start, end, seq_id="Unknown", feature_types
                 y=df_rev['PPR_Binding_Score'],
                 mode='markers',
                 name=f"{name} (-)",
-                marker=dict(color=color, size=7, symbol='diamond', opacity=0.7),
+                marker=dict(color=color, size=8, symbol='diamond',
+                            opacity=0.75, line=dict(width=1, color='rgba(0,0,0,0.4)')),
                 customdata=custom_data,
                 hovertemplate="Pos: %{x}<br>Score: %{y:.2f}<br>Strand: -<br>Gap: %{customdata[2]} (Pos %{customdata[3]})<extra></extra>"
             ), row=rev_row, col=1)
