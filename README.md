@@ -166,9 +166,7 @@ If you use PPPRPP in your research, please cite:
 
 > Igarashi, K. (2026). PPPRPP: A web application for P-type PPR protein target site prediction with gap-tolerant scoring. *Plant Biotechnology*, PB-S-1341.
 
-The source code is archived on Zenodo: [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX)
-
-*(DOI will be updated upon journal publication.)*
+The source code is archived on Zenodo: [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18371990.svg)](https://doi.org/10.5281/zenodo.18371990)
 
 ## License
 
