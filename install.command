@@ -153,10 +153,21 @@ echo ""
 echo "[3/4] Checking Python..."
 if ! command -v python3 &> /dev/null; then
     echo "   Error: python3 not found."
+    echo "   Please install Python 3.10 or newer from https://www.python.org/downloads/"
     read -p "Press Enter to exit..."
     exit 1
 fi
 python3 --version
+PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
+PY_MAJOR=$(python3 -c "import sys; print(sys.version_info.major)")
+if [[ "$PY_MAJOR" -lt 3 || ( "$PY_MAJOR" -eq 3 && "$PY_MINOR" -lt 10 ) ]]; then
+    echo "   Error: Python 3.10 or newer is required (found $(python3 --version))."
+    echo "   gradio 6.x requires Python >=3.10."
+    echo "   Please install Python 3.10+ from https://www.python.org/downloads/"
+    read -p "Press Enter to exit..."
+    exit 1
+fi
+echo "   Python version OK (>=3.10)."
 
 # 4. Setup Virtual Environment
 echo ""

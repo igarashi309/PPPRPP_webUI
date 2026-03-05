@@ -26,12 +26,14 @@ For motif discovery, the app uses **PPRFinder** (Java implementation, `PPRfinder
   bash install.command
   ```
 
+**Requirements**: Python 3.10 or newer is required (gradio 6.x dependency).
+
 This script will:
 1.  Check/Install **HMMER** (required for motif discovery).
     -   *Mac*: Uses Homebrew (`brew install hmmer`).
     -   *Linux/WSL*: Uses apt (`sudo apt install hmmer`).
 2.  Check/Install **Java 17+** (required for Java PPRFinder compatibility).
-3.  Create a Python environment.
+3.  Check **Python 3.10+** and create a virtual environment.
 4.  Install all dependencies.
 
 ### 2. Launch App
@@ -69,6 +71,7 @@ Then open: `http://127.0.0.1:7860`
 
 ## Troubleshooting
 
+- **"Python 3.10 or newer is required"**: Install Python 3.10+ from [python.org](https://www.python.org/downloads/) and retry.
 - **"hmmsearch not found"**: The installer attempts to install HMMER. If it fails, please install it manually:
     -   **Mac**: `brew install hmmer`
     -   **Linux/WSL**: `sudo apt install hmmer`
