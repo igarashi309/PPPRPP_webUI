@@ -148,34 +148,43 @@ else
     exit 1
 fi
 
-# 3. Check Python
+# 3. Check Python (3.10+ required for gradio 6.x)
 echo ""
-echo "[3/4] Checking Python..."
-if ! command -v python3 &> /dev/null; then
-    echo "   Error: python3 not found."
-    echo "   Please install Python 3.10 or newer from https://www.python.org/downloads/"
-    read -p "Press Enter to exit..."
-    exit 1
-fi
-python3 --version
-PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
-PY_MAJOR=$(python3 -c "import sys; print(sys.version_info.major)")
-if [[ "$PY_MAJOR" -lt 3 || ( "$PY_MAJOR" -eq 3 && "$PY_MINOR" -lt 10 ) ]]; then
-    echo "   Error: Python 3.10 or newer is required (found $(python3 --version))."
+echo "[3/4] Checking Python (3.10+ required)..."
+PYTHON_BIN=""
+for CAND in python3.13 python3.12 python3.11 python3.10 \
+            /opt/homebrew/bin/python3.13 /opt/homebrew/bin/python3.12 \
+            /opt/homebrew/bin/python3.11 /opt/homebrew/bin/python3.10 \
+            /usr/local/bin/python3.13 /usr/local/bin/python3.12 \
+            /usr/local/bin/python3.11 /usr/local/bin/python3.10 \
+            python3; do
+    if command -v "$CAND" &>/dev/null; then
+        PY_MAJOR=$("$CAND" -c "import sys; print(sys.version_info.major)" 2>/dev/null)
+        PY_MINOR=$("$CAND" -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
+        if [[ "$PY_MAJOR" -eq 3 && "$PY_MINOR" -ge 10 ]]; then
+            PYTHON_BIN="$CAND"
+            break
+        fi
+    fi
+done
+if [[ -z "$PYTHON_BIN" ]]; then
+    echo "   Error: Python 3.10 or newer not found."
     echo "   gradio 6.x requires Python >=3.10."
-    echo "   Please install Python 3.10+ from https://www.python.org/downloads/"
+    echo "   Install options:"
+    echo "     Mac:       brew install python@3.13"
+    echo "     Other:     https://www.python.org/downloads/"
     read -p "Press Enter to exit..."
     exit 1
 fi
-echo "   Python version OK (>=3.10)."
+echo "   Using: $PYTHON_BIN ($("$PYTHON_BIN" --version))"
 
 # 4. Setup Virtual Environment
 echo ""
 echo "[4/4] Setting up Python Environment..."
 
 if [ ! -d "venv" ]; then
-    echo "   Creating 'venv'..."
-    python3 -m venv venv
+    echo "   Creating 'venv' with $("$PYTHON_BIN" --version)..."
+    "$PYTHON_BIN" -m venv venv
 else
     echo "   Using existing 'venv'."
 fi
