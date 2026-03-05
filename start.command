@@ -8,7 +8,7 @@ cd "$(dirname "$0")"
 # Check if venv exists
 if [ ! -d "venv" ]; then
     echo "Error: 'venv' directory not found."
-    echo "Please run 'install_mac.command' first to set up the environment."
+    echo "Please run 'install.command' first to set up the environment."
     echo ""
     read -p "Press Enter to exit..."
     exit 1

@@ -157,6 +157,8 @@ for CAND in python3.13 python3.12 python3.11 python3.10 \
             /opt/homebrew/bin/python3.11 /opt/homebrew/bin/python3.10 \
             /usr/local/bin/python3.13 /usr/local/bin/python3.12 \
             /usr/local/bin/python3.11 /usr/local/bin/python3.10 \
+            /usr/bin/python3.13 /usr/bin/python3.12 \
+            /usr/bin/python3.11 /usr/bin/python3.10 \
             python3; do
     if command -v "$CAND" &>/dev/null; then
         PY_MAJOR=$("$CAND" -c "import sys; print(sys.version_info.major)" 2>/dev/null)
@@ -186,7 +188,16 @@ if [ ! -d "venv" ]; then
     echo "   Creating 'venv' with $("$PYTHON_BIN" --version)..."
     "$PYTHON_BIN" -m venv venv
 else
-    echo "   Using existing 'venv'."
+    # Check existing venv Python version
+    VENV_MINOR=$(venv/bin/python -c "import sys; print(sys.version_info.minor)" 2>/dev/null || echo "0")
+    VENV_MAJOR=$(venv/bin/python -c "import sys; print(sys.version_info.major)" 2>/dev/null || echo "0")
+    if [[ "$VENV_MAJOR" -lt 3 || ( "$VENV_MAJOR" -eq 3 && "$VENV_MINOR" -lt 10 ) ]]; then
+        echo "   Existing 'venv' uses Python ${VENV_MAJOR}.${VENV_MINOR} (<3.10). Recreating..."
+        rm -rf venv
+        "$PYTHON_BIN" -m venv venv
+    else
+        echo "   Using existing 'venv' (Python ${VENV_MAJOR}.${VENV_MINOR})."
+    fi
 fi
 
 source venv/bin/activate

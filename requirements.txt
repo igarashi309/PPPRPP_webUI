@@ -1,9 +1,9 @@
-biopython
-pandas
-numpy
-plotly
-py3Dmol
-logomaker
-matplotlib
-scipy
+biopython==1.86
+pandas==2.3.3
+numpy==2.4.2
+plotly==6.5.2
+py3Dmol==2.5.4
+logomaker==0.8.7
+matplotlib==3.10.8
+scipy==1.17.1
 gradio==6.2.0

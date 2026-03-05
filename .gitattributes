@@ -1,1 +1,2 @@
 app_backup*.py export-ignore
+.gradio/ export-ignore
