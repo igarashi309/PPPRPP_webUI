@@ -15,6 +15,49 @@ import io
 import shutil
 import subprocess
 import platform
+import json as _json
+
+# --- Vector (SVG) export default for Plotly figures ---
+# Gradio serializes figures via Figure.to_json(), which drops Plotly's `config`.
+# Its frontend, however, passes any top-level `config` key straight to
+# Plotly.react(). We wrap Plot.postprocess once so every rendered Plotly figure
+# defaults its "Download plot" (camera) button to SVG (vector) instead of PNG.
+# Plotly.js supports svg/png/jpeg/webp for this button (PDF is not supported
+# client-side); SVG gives publication-quality vector output with no extra deps.
+_PLOTLY_EXPORT_CONFIG = {
+    "toImageButtonOptions": {"format": "svg", "filename": "pppr_plot"},
+    "displaylogo": False,
+}
+
+
+def _install_svg_export_default():
+    from gradio.components import Plot as _GrPlot
+
+    _orig_postprocess = _GrPlot.postprocess
+
+    def _postprocess_with_svg(self, value):
+        data = _orig_postprocess(self, value)
+        try:
+            if data is not None and getattr(data, "type", None) == "plotly" and data.plot:
+                d = _json.loads(data.plot)
+                cfg = d.get("config") or {}
+                merged = {**_PLOTLY_EXPORT_CONFIG, **cfg}
+                # Preserve any figure-specific toImageButtonOptions on top of ours.
+                if "toImageButtonOptions" in cfg:
+                    merged["toImageButtonOptions"] = {
+                        **_PLOTLY_EXPORT_CONFIG["toImageButtonOptions"],
+                        **cfg["toImageButtonOptions"],
+                    }
+                d["config"] = merged
+                data.plot = _json.dumps(d)
+        except Exception as _e:
+            print(f"Warning: SVG export config injection failed: {_e}")
+        return data
+
+    _GrPlot.postprocess = _postprocess_with_svg
+
+
+_install_svg_export_default()
 
 # --- Constants ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -2255,12 +2298,16 @@ def visualize_single_site(row):
                 tickfont=dict(size=10),
                 automargin=True
             ),
-            yaxis_title="Binding Score",
+            yaxis=dict(
+                title="Binding Score",
+                rangemode='tozero'  # Anchor 0 at the plot floor
+            ),
             yaxis2=dict(
                 title="Motif Confidence",
                 overlaying='y',
                 side='right',
-                showgrid=False
+                showgrid=False,
+                rangemode='tozero'  # Align Motif Confidence 0 with Binding Score 0
             ),
             height=400,
             showlegend=True,

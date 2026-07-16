@@ -1,5 +1,13 @@
 # Changelog
 
+## [v1.1.1] - 2026-07-16
+
+### Added
+- **Vector (SVG) Figure Export**: The "Download plot" (camera) button on all Plotly figures now exports **SVG** (vector) by default instead of PNG, giving publication-quality output that scales without pixelation and is editable in Illustrator/Inkscape. Implemented centrally by injecting a Plotly `config` into Gradio's plot serialization — no new dependencies and no changes to individual figure code. (Client-side export supports SVG/PNG/JPEG/WebP; PDF is not available from the button — convert the SVG if a PDF is required.)
+
+### Fixed
+- **Detail Inspector Axis Alignment**: In the Detail Inspector plot, the left (Binding Score) and right (Motif Confidence) y-axes auto-ranged independently, placing their zero baselines at different vertical positions. This made bars appear as if Binding Score could be negative. Both axes now use `rangemode='tozero'`, anchoring the zero of Motif Confidence to the zero of Binding Score. Binding Score values themselves are unchanged (always non-negative); this is a display-only fix.
+
 ## [v1.1.0] - 2026-03-04
 
 ### Added
